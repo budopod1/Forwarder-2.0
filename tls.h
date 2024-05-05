@@ -1,7 +1,7 @@
 #include <openssl/ssl.h>
 
 #ifndef TLS_H
-#define TLS_HSSLTLS_H_H
+#define TLS_H
 
 void setup_SSL();
 
