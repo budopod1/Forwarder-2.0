@@ -24,6 +24,8 @@ struct PStrPair {
 
 struct PStr *new_PStr();
 
+struct PStr *PStr_from_CStr(char *cstr);
+
 void free_PStr(struct PStr *str);
 
 void free_PStrList(struct PStrList *list);
@@ -36,7 +38,7 @@ void null_terminate_PStr(struct PStr *str);
 
 struct PStr *slice_PStr(struct PStr *source, int start, int len);
 
-struct PStrList *split_PStr(struct PStr *txt, char *splitter);
+struct PStrList *split_PStr(struct PStr *txt, char *splitter, int splitter_len);
 
 int CStr_equals_PStr(char *cstr, struct PStr *pstr);
 
@@ -54,10 +56,18 @@ void extend_PStr(struct PStr *str, const char *other, int other_len);
 
 struct PStr *join_PStrList(struct PStrList *list, char *sep, int sep_len);
 
+struct PStr *PStr_replace(struct PStr *str, char *from, int from_len, char *to, int to_len);
+
+struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char *to, int to_len);
+
+struct PStr *PStr_to_lower(struct PStr *str);
+
 struct PStr *_build_PStr(const char *fmt, va_list args);
 
 struct PStr *build_PStr(const char *fmt, ...);
 
 void printf_PStr(const char *fmt, ...);
+
+typedef int (*recv_PStr)(struct PStr *str);
 
 #endif

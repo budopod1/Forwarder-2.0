@@ -8,19 +8,11 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include "config.h"
 #include "pstr.h"
-
-char *TARGETHOSTNAME = "example.com";
-char *TARGETPORT = "80";
+#include "tls.h"
 
 struct addrinfo *targetinfo;
-
-char *SERVEPORT = "8080";
-int BACKLOG = 10;
-int MAX_RECV = 1024;
-
-int REQUEST = 1;
-int RESPONSE = 0;
 
 struct Header {
     struct PStr key;
@@ -82,7 +74,13 @@ void free_ResponseHeaders(struct ResponseHeaders *headers) {
     free(headers);
 }
 
-int recv_PStr(int sock, struct PStr *str) {
+int BASIC_RECV_SOCK;
+
+void set_basic_recv_sock(int sock) {
+    BASIC_RECV_SOCK = sock;
+}
+
+int recv_PStr_basic(struct PStr *str) {
     int old_len = str->length;
     int possible_len = old_len + MAX_RECV;
     if (str->capacity < 0) {
@@ -93,7 +91,7 @@ int recv_PStr(int sock, struct PStr *str) {
         str->text = realloc(str->text, possible_len);
         str->capacity = possible_len;
     }
-    int bytes_recv = recv(sock, str->text+old_len, MAX_RECV, 0);
+    int bytes_recv = recv(BASIC_RECV_SOCK, str->text+old_len, MAX_RECV, 0);
     if (bytes_recv == 0) return 1;
     str->length = old_len + bytes_recv;
     return 0;
@@ -173,7 +171,7 @@ enum HTTPVersion parse_http_version(struct PStr *str) {
 }
 
 int parse_request_start_line(struct RequestHeaders *headers, struct PStr *start_line) {
-    struct PStrList *parts = split_PStr(start_line, " ");
+    struct PStrList *parts = split_PStr(start_line, " ", 1);
     if (parts->count != 3) {
         free_PStrList(parts);
         printf_PStr("Invalid start line %p\n", start_line);
@@ -228,6 +226,9 @@ struct Header *parse_header(struct PStr *txt) {
         printf("Invalid http header\n");
         return NULL;
     }
+    struct PStr *key = &pair->first;
+    memcpy(&pair->first, PStr_to_lower(key), sizeof(struct PStr));
+    // the old key's capacity will alway's be -1, so it doesn't need to be freed
     return (struct Header*)pair;
 }
 
@@ -235,7 +236,7 @@ struct Headers *parse_headers(int isRequest, struct PStr *txt) {
     struct Headers *headers = malloc(isRequest ? sizeof(struct RequestHeaders) : sizeof(struct ResponseHeaders));
     int headerCount = 0;
     struct Header **header_list = NULL;
-    struct PStrList *list = split_PStr(txt, "\r\n");
+    struct PStrList *list = split_PStr(txt, "\r\n", 2);
     for (int i = 0; i < list->count; i++) {
         struct PStr *header_txt = list->items + i;
         if (i == 0) {
@@ -253,15 +254,6 @@ struct Headers *parse_headers(int isRequest, struct PStr *txt) {
             continue;
         }
         struct Header *header = parse_header(header_txt);
-        for (int j = 0; j < headerCount; j++) {
-            struct PStr *listHeaderKey = &header_list[j]->key;
-            int header_len = listHeaderKey->length;
-            if (header_len != header->key.length) continue;
-            if (memcmp(listHeaderKey->text, header->key.text, header_len) == 0) {
-                printf("Same http header recieved twice\n");
-                return NULL;
-            }
-        }
         if (header == NULL) {
             free_PStrList(list);
             return NULL;
@@ -283,7 +275,7 @@ void remove_header(struct Headers *headers, char *removee) {
             free_PStrPair((struct PStrPair*)header);
             int size = (--headers->count-i)*sizeof(struct Header*);
             memcpy(headers->headers+i, headers->headers+i+1, size);
-            break;
+            i--;
         }
     }
 }
@@ -326,11 +318,11 @@ void set_header_PStr(struct Headers *headers, char *key, struct PStr *value) {
 
 char *REQEND = "\r\n\r\n";
 
-struct PStr *recv_headers(struct PStr *req, int remote) {
+struct PStr *recv_headers(struct PStr *req, recv_PStr recver) {
     int i = 0;
     while (1) {
-        if (recv_PStr(remote, req)) {
-            printf("Connection unexpectedly closed\n");
+        if (recver(req)) {
+            printf("Connection unexpectedly closed while receiving headers\n");
             return NULL;
         }
         int req_end_len = strlen(REQEND);
@@ -343,16 +335,16 @@ struct PStr *recv_headers(struct PStr *req, int remote) {
     }
 }
 
-int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, int remote, struct PStr **request_body) {
+int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
     *request_body = new_PStr();
-    struct PStr *transferEncoding = get_header(headers, "Transfer-Encoding");
+    struct PStr *transferEncoding = get_header(headers, "transfer-encoding");
     if (transferEncoding != NULL) {
         if (!CStr_equals_PStr("identity", transferEncoding)) {
-            printf("Non-identity transfer encoding not supported\n");
+            printf_PStr("%p transfer encoding not supported\n", transferEncoding);
             return 1;
         }
     }
-    struct PStr *contentLengthTxt = get_header(headers, "Content-Length");
+    struct PStr *contentLengthTxt = get_header(headers, "content-length");
     if (contentLengthTxt == NULL) {
         return 0;
     }
@@ -367,7 +359,8 @@ int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers
     }
     int ogLength = headersTxt->length + strlen(REQEND);
     while (req->length < contentLength + ogLength) {
-        if (recv_PStr(remote, req)) {
+        if (recver(req)) {
+            printf("Connection unexpectedly closed while receiving body\n");
             return 1;
         }
     }
@@ -388,40 +381,59 @@ struct PStr *forward(struct PStr *request) {
         exit(1);
     }
 
+#ifdef USE_SSL
+    SSL *ssl = upgrade_to_SSL(TARGETHOSTNAME, target);
+
+    if (send_PStr_SSL(ssl, request)) {
+        printf("failed to forward request through SSL\n");
+        exit(1);
+    }
+#else
     if (send_PStr(target, request)) {
         printf("failed to forward request\n");
         exit(1);
     }
+#endif
+    
+#ifdef USE_SSL
+    set_SSL_recv(ssl);
+    recv_PStr recver = &recv_PStr_SSL;
+#else
+    set_basic_recv_sock(target);
+    recv_PStr recver = &recv_PStr_basic;
+#endif
 
-    struct PStr *res = new_PStr();
-    struct PStr *response_headers = recv_headers(res, target);
+    struct PStr *res1 = new_PStr();
+    struct PStr *response_headers = recv_headers(res1, recver);
     if (response_headers == NULL) {
         close(target);
-        free_PStr(res);
+        free_PStr(res1);
         return NULL;
     }
 
     struct ResponseHeaders *headers = (struct ResponseHeaders*)parse_headers(RESPONSE, response_headers);
     if (headers == NULL) {
         close(target);
-        free_PStr(res);
+        free_PStr(res1);
         free_PStr(response_headers);
         return NULL;
     }
 
+    struct PStr *res2 = clone_PStr(res1);
+
     struct PStr *response_body;
-    if (recv_body(res, response_headers, (struct Headers*)headers, target, &response_body)) {
+    if (recv_body(res2, response_headers, (struct Headers*)headers, recver, &response_body)) {
         close(target);
-        free_PStr(res);
+        free_PStr(res1);
+        free_PStr(res2);
         free_PStr(response_headers);
         free_ResponseHeaders(headers);
         return NULL;
     }
 
-    struct PStr *redirect = get_header((struct Headers*)headers, "Location");
+    struct PStr *redirect = get_header((struct Headers*)headers, "location");
     if (redirect != NULL) {
-        printf_PStr("%p\n", redirect);
-        exit(0);
+        move_PStr(PStr_replace_once(redirect, TARGETHOSTNAME, strlen(TARGETHOSTNAME), OURHOSTNAME, strlen(OURHOSTNAME)), redirect);
     }
 
     struct PStr *new_headers = str_response_headers(headers);
@@ -430,7 +442,8 @@ struct PStr *forward(struct PStr *request) {
         "%p%s%p", new_headers, REQEND, response_body
     );
 
-    free_PStr(res);
+    free_PStr(res1);
+    free_PStr(res2);
     free_PStr(response_headers);
     free_ResponseHeaders(headers);
     free_PStr(response_body);
@@ -445,10 +458,11 @@ void accept_request(int server) {
     struct sockaddr_storage remote_addr;
     socklen_t remote_addr_size = sizeof(remote_addr);
     int remote = accept(server, (struct sockaddr*)&remote_addr, &remote_addr_size);
-    printf("Got request\n");
+    set_basic_recv_sock(remote);
+    recv_PStr recver = &recv_PStr_basic;
     
     struct PStr *req = new_PStr();
-    struct PStr *request_headers = recv_headers(req, remote);
+    struct PStr *request_headers = recv_headers(req, recver);
     if (request_headers == NULL) {
         close(remote);
         free_PStr(req);
@@ -464,7 +478,7 @@ void accept_request(int server) {
     }
     
     struct PStr *request_body;
-    if (recv_body(req, request_headers, (struct Headers*)headers, remote, &request_body)) {
+    if (recv_body(req, request_headers, (struct Headers*)headers, recver, &request_body)) {
         close(remote);
         free_PStr(req);
         free_PStr(request_headers);
@@ -472,12 +486,12 @@ void accept_request(int server) {
         return;
     }
 
-    remove_header((struct Headers*)headers, "Referer");
+    remove_header((struct Headers*)headers, "referer");
     
-    set_header((struct Headers*)headers, "User-Agent", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+    set_header((struct Headers*)headers, "user-agent", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
     
     struct PStr *target_host = build_PStr("%s:%s", TARGETHOSTNAME, TARGETPORT);
-    set_header_PStr((struct Headers*)headers, "Host", target_host);
+    set_header_PStr((struct Headers*)headers, "host", target_host);
     
     struct PStr *new_headers = str_request_headers(headers);
 
@@ -490,7 +504,7 @@ void accept_request(int server) {
     free_RequestHeaders(headers);
     free_PStr(request_body);
     free_PStr(new_headers);
-    
+
     struct PStr *response = forward(forwardee);
     
     free_PStr(forwardee);
@@ -503,6 +517,10 @@ void accept_request(int server) {
 }
 
 int main() {
+#ifdef USE_SSL
+    setup_SSL();
+#endif
+    
     int getaddrinfo_status;
     
     struct addrinfo hints;

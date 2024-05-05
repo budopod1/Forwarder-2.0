@@ -1,7 +1,7 @@
 all: main
 
 CC = clang
-override CFLAGS += -g -Wall -Wextra -Werror -pedantic-errors -pthread -lm
+override CFLAGS += -g -Wall -Wextra -Werror -pedantic-errors -pthread -lm -lssl -lcrypto
 
 SRCS = $(shell find . -name '.ccls-cache' -type d -prune -o -type f -name '*.c' -print)
 HEADERS = $(shell find . -name '.ccls-cache' -type d -prune -o -type f -name '*.h' -print)

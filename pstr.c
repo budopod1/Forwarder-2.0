@@ -10,6 +10,14 @@ struct PStr *new_PStr() {
     return str;
 }
 
+struct PStr *PStr_from_CStr(char *cstr) {
+    struct PStr *str = malloc(sizeof(struct PStr));
+    str->length = strlen(cstr);
+    str->capacity = -1;
+    str->text = cstr;
+    return str;
+}
+
 void free_PStr(struct PStr *str) {
     if (str == NULL) return;
     if (str->capacity != -1) {
@@ -65,8 +73,7 @@ struct PStr *slice_PStr(struct PStr *source, int start, int len) {
     return str;
 }
 
-struct PStrList *split_PStr(struct PStr *txt, char *splitter) {
-    int splitter_len = strlen(splitter);
+struct PStrList *split_PStr(struct PStr *txt, char *splitter, int splitter_len) {
     struct PStrList *list = malloc(sizeof(struct PStrList));
     int count = 0;
     list->items = NULL;
@@ -136,9 +143,7 @@ void move_PStr(struct PStr *from, struct PStr *to) {
     to->capacity = from->capacity;
     to->length = from->length;
     to->text = from->text;
-    from->capacity = -1;
-    from->length = 0;
-    from->text = NULL;
+    free(from);
 }
 
 void CStr_copy_to_PStr(char *from, struct PStr *to) {
@@ -182,6 +187,48 @@ struct PStr *join_PStrList(struct PStrList *list, char *sep, int sep_len) {
         pos += item->length;
     }
     return str;
+}
+
+struct PStr *PStr_replace(struct PStr *str, char *from, int from_len, char *to, int to_len) {
+    struct PStrList *list = split_PStr(str, from, from_len);
+    struct PStr *result = join_PStrList(list, to, to_len);
+    free_PStrList(list);
+    return result;
+}
+
+struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char *to, int to_len) {
+    struct PStr *result = malloc(sizeof(struct PStr));
+    for (int i = 0; i <= str->length - from_len; i++) {
+        if (memcmp(str->text + i, from, from_len) == 0) {
+            int new_len = str->length - from_len + to_len;
+            result->length = new_len;
+            result->capacity = new_len;
+            result->text = malloc(new_len);
+            memcpy(result->text, str->text, i);
+            memcpy(result->text+i, to, to_len);
+            int rest = i + from_len;
+            memcpy(result->text+i+to_len, str->text+rest, str->length-rest);
+            return result;
+        }
+    }
+    memcpy(result, str, sizeof(struct PStr));
+    result->capacity = -1;
+    return result;
+}
+
+struct PStr *PStr_to_lower(struct PStr *str) {
+    struct PStr *result = malloc(sizeof(struct PStr));
+    result->capacity = str->length;
+    result->length = str->length;
+    result->text = malloc(str->length);
+    for (int i = 0; i < str->length; i++) {
+        char chr = str->text[i];
+        if (chr >= 65 && chr <= 90) {
+            chr = chr | 32;
+        }
+        result->text[i] = chr;
+    }
+    return result;
 }
 
 struct PStr *_build_PStr(const char *fmt, va_list args) {
