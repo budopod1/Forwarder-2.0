@@ -223,7 +223,7 @@ int parse_response_start_line(struct ResponseHeaders *headers, struct PStr *star
 struct Header *parse_header(struct PStr *txt) {
     struct PStrPair *pair = partition_PStr(txt, ": ");
     if (pair == NULL) {
-        printf("Invalid http header\n");
+        printf_PStr("Invalid http header: %p\n", txt);
         return NULL;
     }
     struct PStr *key = &pair->first;

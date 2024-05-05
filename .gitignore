@@ -52,3 +52,6 @@ Mkfile.old
 dkms.conf
 
 .ccls-cache
+report.txt
+main
+main-debug

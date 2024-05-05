@@ -159,8 +159,10 @@ void extend_PStr(struct PStr *str, const char *other, int other_len) {
     }
     int new_len = str->length + other_len;
     if (str->capacity < new_len) {
-        str->text = realloc(str->text, new_len);
-        str->capacity = new_len;
+        int new_cap = (3 * str->length) / 2;
+        if (new_cap < new_len) new_cap = new_len;
+        str->text = realloc(str->text, new_cap);
+        str->capacity = new_cap;
     }
     memcpy(str->text + str->length, other, other_len);
     str->length = new_len;

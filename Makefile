@@ -1,6 +1,6 @@
 all: main
 
-CC = clang
+CC = gcc
 override CFLAGS += -g -Wall -Wextra -Werror -pedantic-errors -pthread -lm -lssl -lcrypto
 
 SRCS = $(shell find . -name '.ccls-cache' -type d -prune -o -type f -name '*.c' -print)
@@ -10,7 +10,7 @@ main: $(SRCS) $(HEADERS)
 	$(CC) $(CFLAGS) $(SRCS) -o "$@"
 
 main-debug: $(SRCS) $(HEADERS)
-	$(CC) $(CFLAGS) -O0 $(SRCS) -o "$@"
+	$(CC) $(CFLAGS) -pg $(SRCS) -o "$@"
 
 clean:
 	rm -f main main-debug
