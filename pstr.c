@@ -282,10 +282,10 @@ struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char 
 }
 
 struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len) {
-    struct PStr *result = malloc(sizeof(struct PStr));
     for (int i = 0; i <= str->length - removee_len; i++) {
         if (memcmp(str->text + i, removee, removee_len) == 0) {
             int new_len = str->length - removee_len;
+            struct PStr *result = malloc(sizeof(struct PStr));
             result->length = new_len;
             result->capacity = new_len;
             result->text = malloc(new_len);
@@ -295,9 +295,7 @@ struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len) 
             return result;
         }
     }
-    memcpy(result, str, sizeof(struct PStr));
-    result->capacity = -1;
-    return result;
+    return clone_PStr(str);
 }
 
 struct PStr *PStr_to_lower(struct PStr *str) {
