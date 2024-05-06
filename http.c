@@ -10,6 +10,7 @@
 
 char *METHODSTXT[] = {"GET", "POST", "HEAD", "OPTIONS"};
 char *VERSIONSTXT[] = {"HTTP/1.0", "HTTP/1.1", "HTTP/2.0"};
+char *TRANSFERENCODINGSTXT[] = {"identity", "chunked", "compress", "deflate", "gzip"};
 
 void free_RequestHeaders(struct RequestHeaders *headers) {
     free_PStr(headers->url);
@@ -82,7 +83,7 @@ struct PStr *str_header_list(const struct Headers *headers) {
         memcpy(target_loc, built, sizeof(struct PStr));
         free(built);
     }
-    struct PStr *result = join_PStrList(lines, "\r\n", 2);
+    struct PStr *result = join_PStrList(lines, HTTPNEWLINE, HTTPNEWLINESIZE);
     free_PStrList(lines);
     return result;
 }
@@ -92,7 +93,7 @@ struct PStr *str_request_headers(struct RequestHeaders *headers) {
     char *version = str_http_version(headers->http_version);
     struct PStr *header_list = str_header_list((struct Headers*)headers);
     struct PStr *result = build_PStr(
-        "%s %p %s\r\n%p", method, headers->url, version, header_list
+        "%s %p %s"HTTPNEWLINE"%p", method, headers->url, version, header_list
     );
     free_PStr(header_list);
     return result;
@@ -102,7 +103,7 @@ struct PStr *str_response_headers(struct ResponseHeaders *headers) {
     char *version = str_http_version(headers->http_version);
     struct PStr *header_list = str_header_list((struct Headers*)headers);
     struct PStr *result = build_PStr(
-        "%s %p\r\n%p", version, headers->status, header_list
+        "%s %p"HTTPNEWLINE"%p", version, headers->status, header_list
     );
     free_PStr(header_list);
     return result;
@@ -114,6 +115,16 @@ enum HTTPMethod parse_method(struct PStr *str) {
 
 enum HTTPVersion parse_http_version(struct PStr *str) {
     return parse_enum(str, VERSIONSTXT, UNKNOWNVERSION);
+}
+
+enum TransferEncoding parse_transfer_encoding(struct PStr *str) {
+    enum TransferEncoding result = identity_TRANSFERENCODING;
+    struct PStrList *parts = split_trim_PStr(str, ",", 1, " ", 1);
+    for (int i = 0; i < parts->count; i++) {
+        result |= parse_enum_flag(&parts->items[i], TRANSFERENCODINGSTXT, UNKNOWNTRANSFERENCODING);
+    }
+    if (result == 0) return UNKNOWNTRANSFERENCODING;
+    return result;
 }
 
 int parse_request_start_line(struct RequestHeaders *headers, struct PStr *start_line) {
@@ -147,7 +158,7 @@ int parse_request_start_line(struct RequestHeaders *headers, struct PStr *start_
 }
 
 int parse_response_start_line(struct ResponseHeaders *headers, struct PStr *start_line) {
-    struct PStrPair *pair = partition_PStr(start_line, " ");
+    struct PStrPair *pair = partition_PStr(start_line, " ", 1);
     if (pair == NULL) {
         printf_PStr("Invalid start line %p\n", start_line);
         return 1;
@@ -167,7 +178,7 @@ int parse_response_start_line(struct ResponseHeaders *headers, struct PStr *star
 }
 
 struct Header *parse_header(struct PStr *txt) {
-    struct PStrPair *pair = partition_PStr(txt, ": ");
+    struct PStrPair *pair = partition_trim_PStr(txt, ":", 1, " ", 1);
     if (pair == NULL) {
         printf_PStr("Invalid http header: %p\n", txt);
         return NULL;
@@ -182,7 +193,7 @@ struct Headers *parse_headers(int isRequest, struct PStr *txt) {
     struct Headers *headers = malloc(isRequest ? sizeof(struct RequestHeaders) : sizeof(struct ResponseHeaders));
     int headerCount = 0;
     struct Header **header_list = NULL;
-    struct PStrList *list = split_PStr(txt, "\r\n", 2);
+    struct PStrList *list = split_PStr(txt, HTTPNEWLINE, HTTPNEWLINESIZE);
     for (int i = 0; i < list->count; i++) {
         struct PStr *header_txt = list->items + i;
         if (i == 0) {
@@ -262,8 +273,6 @@ void set_header_PStr(struct Headers *headers, char *key, struct PStr *value) {
     }
 }
 
-char *HEADERSEND = "\r\n\r\n";
-
 struct PStr *recv_headers(struct PStr *req, recv_PStr recver) {
     int i = 0;
     while (1) {
@@ -271,45 +280,113 @@ struct PStr *recv_headers(struct PStr *req, recv_PStr recver) {
             printf("Connection unexpectedly closed while receiving headers\n");
             return NULL;
         }
-        int req_end_len = strlen(HEADERSEND);
-        int max_i = req->length + req_end_len - 1;
-        for (; i < max_i; i++) {
-            if (memcmp(req->text + i, HEADERSEND, req_end_len) == 0) {
+        for (; i <= req->length - HEADERSENDSIZE; i++) {
+            if (memcmp(req->text + i, HEADERSEND, HEADERSENDSIZE) == 0) {
                 return slice_PStr(req, 0, i);
             }
         }
     }
 }
 
-int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
-    *request_body = new_PStr();
-    struct PStr *transferEncoding = get_header(headers, "transfer-encoding");
-    if (transferEncoding != NULL) {
-        if (!CStr_equals_PStr("identity", transferEncoding)) {
-            printf_PStr("%p transfer encoding not supported\n", transferEncoding);
-            return 1;
+int recv_body_fail() {
+    printf("Connection unexpectedly closed while receiving body\n");
+    return 1;
+}
+
+int recv_body_chunked(struct PStr *req, struct PStr *headersTxt, recv_PStr recver, struct PStr **request_body) {
+    int chunkSize = -1;
+    int ogLength = headersTxt->length + HEADERSENDSIZE;
+    int i = ogLength;
+    
+    while (1) {
+        int numStart = i;
+        int hasExtension = 0;
+        while (1) {
+            for (; i <= req->length - HTTPNEWLINESIZE; i++) {
+                hasExtension = req->text[i] == ';';
+                if (hasExtension || (memcmp(req->text + i, HTTPNEWLINE, HTTPNEWLINESIZE) == 0)) {
+                    if (parse_int(req->text + numStart, i - numStart, 16, &chunkSize)) {
+                        printf("Invalid chunk size\n");
+                        return 1;
+                    }
+                    goto foundChunkSize;
+                }
+            }
+            if (recver(req)) return recv_body_fail();
+        }
+        
+    foundChunkSize:
+        if (hasExtension) {
+            while (1) {
+                for (; i <= req->length - HTTPNEWLINESIZE; i++) {
+                    if (memcmp(req->text + i, HTTPNEWLINE, HTTPNEWLINESIZE) == 0) {
+                        goto finishedExtension;
+                    }
+                }
+                if (recver(req)) return recv_body_fail();
+            }
+        }
+
+    finishedExtension:
+        if (chunkSize == 0) {
+            // parse trailers (trailers end marked by same marker as headers end)
+            while (1) {
+                for (; i <= req->length - HEADERSENDSIZE; i++) {
+                    if (memcmp(req->text + i, HEADERSEND, HEADERSENDSIZE) == 0) {
+                        i += HEADERSENDSIZE;
+                        *request_body = slice_PStr(req, ogLength, i - ogLength);
+                        return 0;
+                    }
+                }
+                if (recver(req)) return recv_body_fail();
+            }
+        } else {
+            i += HTTPNEWLINESIZE + chunkSize + HTTPNEWLINESIZE;
+            while (req->length < i) {
+                if (recver(req)) return recv_body_fail();
+            }
+            continue;
         }
     }
+}
+
+int recv_body_identity(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
     struct PStr *contentLengthTxt = get_header(headers, "content-length");
     if (contentLengthTxt == NULL) {
         return 0;
     }
-    contentLengthTxt = clone_PStr(contentLengthTxt);
-    null_terminate_PStr(contentLengthTxt);
-    char *contentLengthEnd;
-    int contentLength = strtol(contentLengthTxt->text, &contentLengthEnd, 10);
-    free_PStr(contentLengthTxt);
-    if (contentLengthTxt->text == contentLengthEnd) {
+
+    int contentLength;
+    if (PStr_parse_int(contentLengthTxt, 10, &contentLength)) {
         printf("Invalid Content-Length\n");
         return 1;
     }
-    int ogLength = headersTxt->length + strlen(REQEND);
+    
+    int ogLength = headersTxt->length + strlen(HEADERSEND);
     while (req->length < contentLength + ogLength) {
-        if (recver(req)) {
-            printf("Connection unexpectedly closed while receiving body\n");
+        if (recver(req)) return recv_body_fail();
+    }
+    
+    *request_body = slice_PStr(req, ogLength, contentLength);
+    return 0;
+}
+
+int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
+    *request_body = new_PStr();
+    
+    enum TransferEncoding encoding = identity_TRANSFERENCODING;
+    struct PStr *transferEncodingTxt = get_header(headers, "transfer-encoding");
+    if (transferEncodingTxt != NULL) {
+        encoding = parse_transfer_encoding(transferEncodingTxt);
+        if (encoding & UNKNOWNTRANSFERENCODING) {
+            printf("Unknown Transfer-Encoding\n");
             return 1;
         }
     }
-    *request_body = slice_PStr(req, ogLength, contentLength);
-    return 0;
+    
+    if (encoding & chunked_TRANSFERENCODING) {
+        return recv_body_chunked(req, headersTxt, recver, request_body);
+    } else {
+        return recv_body_identity(req, headersTxt, headers, recver, request_body);
+    }
 }

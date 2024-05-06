@@ -18,6 +18,13 @@ struct PStr *PStr_from_CStr(char *cstr) {
     return str;
 }
 
+char *CStr_from_PStr(struct PStr *str) {
+    char *result = malloc(str->length+1);
+    memcpy(result, str->text, str->length);
+    result[str->length] = '\0';
+    return result;
+}
+
 void free_PStr(struct PStr *str) {
     if (str == NULL) return;
     if (str->capacity != -1) {
@@ -76,6 +83,38 @@ struct PStr *slice_PStr(struct PStr *source, int start, int len) {
 struct PStrList *split_PStr(struct PStr *txt, char *splitter, int splitter_len) {
     struct PStrList *list = malloc(sizeof(struct PStrList));
     int count = 0;
+    int capacity = 0;
+    list->items = NULL;
+    int secstart = 0;
+    for (int i = 0; i <= txt->length - splitter_len; i++) {
+        if (memcmp(txt->text + i, splitter, splitter_len) == 0) {
+            if (count == capacity) {
+                // TODO: smarter growing scheme
+                list->items = realloc(list->items, ++capacity*sizeof(struct PStr));
+            }
+            struct PStr *new_val = list->items + count++;
+            new_val->capacity = -1;
+            new_val->length = i - secstart;
+            new_val->text = txt->text + secstart;
+            i += splitter_len;
+            secstart = i;
+        }
+    }
+    if (count == capacity) {
+        list->items = realloc(list->items, (capacity+1)*sizeof(struct PStr));
+    }
+    struct PStr *new_val = list->items + count++;
+    new_val->capacity = -1;
+    new_val->length = txt->length - secstart;
+    new_val->text = txt->text + secstart;
+    list->count = count;
+    if (txt->capacity != -1) txt->capacity = -2;
+    return list;
+}
+
+struct PStrList *split_trim_PStr(struct PStr *txt, char *splitter, int splitter_len, char *trimee, int trimee_len) {
+    struct PStrList *list = malloc(sizeof(struct PStrList));
+    int count = 0;
     list->items = NULL;
     int secstart = 0;
     for (int i = 0; i <= txt->length - splitter_len; i++) {
@@ -85,7 +124,9 @@ struct PStrList *split_PStr(struct PStr *txt, char *splitter, int splitter_len) 
             new_val->capacity = -1;
             new_val->length = i - secstart;
             new_val->text = txt->text + secstart;
-            i += splitter_len;
+            for (i += splitter_len; i <= txt->length - trimee_len; i+=trimee_len) {
+                if (memcmp(txt->text+i, trimee, trimee_len) != 0) break;
+            }
             secstart = i;
         }
     }
@@ -104,8 +145,7 @@ int CStr_equals_PStr(char *cstr, struct PStr *pstr) {
     return memcmp(cstr, pstr->text, pstr->length) == 0;
 }
 
-struct PStrPair *partition_PStr(struct PStr *txt, char *splitter) {
-    int splitter_len = strlen(splitter);
+struct PStrPair *partition_PStr(struct PStr *txt, char *splitter, int splitter_len) {
     for (int i = 0; i <= txt->length - splitter_len; i++) {
         if (memcmp(txt->text + i, splitter, splitter_len) == 0) {
             struct PStrPair *pair = malloc(sizeof(struct PStrPair));
@@ -117,6 +157,29 @@ struct PStrPair *partition_PStr(struct PStr *txt, char *splitter) {
             second->capacity = -1;
             second->length = txt->length - i - splitter_len;
             second->text = txt->text + i + splitter_len;
+            return pair;
+        }
+    }
+    if (txt->capacity != -1) txt->capacity = -2;
+    return NULL;
+}
+
+struct PStrPair *partition_trim_PStr(struct PStr *txt, char *splitter, int splitter_len, char *trimee, int trimee_len) {
+    for (int i = 0; i <= txt->length - splitter_len; i++) {
+        if (memcmp(txt->text+i, splitter, splitter_len) == 0) {
+            struct PStrPair *pair = malloc(sizeof(struct PStrPair));
+            struct PStr *first = &pair->first;
+            first->capacity = -1;
+            first->length = i;
+            first->text = txt->text;
+            int j = i + splitter_len;
+            for (; j <= txt->length - trimee_len; j+=trimee_len) {
+                if (memcmp(txt->text+j, trimee, trimee_len) != 0) break;
+            }
+            struct PStr *second = &pair->second;
+            second->capacity = -1;
+            second->length = txt->length - j;
+            second->text = txt->text + j;
             return pair;
         }
     }
@@ -295,4 +358,15 @@ void printf_PStr(const char *fmt, ...) {
 
     print_PStr(str);
     free_PStr(str);
+}
+
+int CStr_parse_int(char *txt, int base, int *result) {
+    char *endptr;
+    *result = (int)strtol(txt, &endptr, base);
+    return txt + strlen(txt) != endptr;
+}
+
+int PStr_parse_int(struct PStr *str, int base, int *result) {
+    char *cstr = CStr_from_PStr(str);
+    return CStr_parse_int(cstr, base, result);
 }

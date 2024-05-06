@@ -33,12 +33,12 @@ struct PStr *forward(struct PStr *request) {
 
     if (send_PStr_SSL(ssl, request)) {
         printf("failed to forward request through SSL\n");
-        exit(1);
+        return NULL;
     }
 #else
     if (send_PStr(target, request)) {
         printf("failed to forward request\n");
-        exit(1);
+        return NULL;
     }
 #endif
     
@@ -77,6 +77,12 @@ struct PStr *forward(struct PStr *request) {
         free_ResponseHeaders(headers);
         return NULL;
     }
+    
+    remove_header((struct Headers*)headers, "strict-transport-security");
+    remove_header((struct Headers*)headers, "content-security-policy");
+    // backwards compatibility:
+    remove_header((struct Headers*)headers, "x-content-security-policy");
+    remove_header((struct Headers*)headers, "x-frame-options");
 
     struct PStr *redirect = get_header((struct Headers*)headers, "location");
     if (redirect != NULL) {
@@ -86,7 +92,7 @@ struct PStr *forward(struct PStr *request) {
     struct PStr *new_headers = str_response_headers(headers);
 
     struct PStr *result = build_PStr(
-        "%p%s%p", new_headers, REQEND, response_body
+        "%p%s%p", new_headers, HEADERSEND, response_body
     );
 
     free_PStr(res1);
@@ -136,6 +142,8 @@ void accept_request(int server) {
     remove_header((struct Headers*)headers, "referer");
     
     set_header((struct Headers*)headers, "user-agent", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+
+    set_header((struct Headers*)headers, "accept-encoding", "identity");
     
     struct PStr *target_host = build_PStr("%s:%s", TARGETHOSTNAME, TARGETPORT);
     set_header_PStr((struct Headers*)headers, "host", target_host);
@@ -143,7 +151,7 @@ void accept_request(int server) {
     struct PStr *new_headers = str_request_headers(headers);
 
     struct PStr *forwardee = build_PStr(
-        "%p%s%p", new_headers, REQEND, request_body
+        "%p%s%p", new_headers, HEADERSEND, request_body
     );
 
     free_PStr(req);
@@ -153,13 +161,17 @@ void accept_request(int server) {
     free_PStr(new_headers);
 
     struct PStr *response = forward(forwardee);
-    
+
+    if (response == NULL) {
+        return;
+    }
+
     free_PStr(forwardee);
 
     send_PStr(remote, response);
-    
+
     free_PStr(response);
-    
+
     close(remote);
 }
 

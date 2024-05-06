@@ -3,6 +3,11 @@
 #ifndef HTTP_H
 #define HTTP_H
 
+#define HTTPNEWLINE "\r\n"
+#define HTTPNEWLINESIZE 2
+#define HEADERSEND "\r\n\r\n"
+#define HEADERSENDSIZE 4
+
 struct Header {
     struct PStr key;
     struct PStr value;
@@ -23,6 +28,18 @@ enum HTTPVersion {
 };
 #ifndef HTTP_SRC
 extern char *VERSIONSTXT[];
+#endif
+
+enum TransferEncoding {
+    identity_TRANSFERENCODING = 0,
+    chunked_TRANSFERENCODING = 1,
+    compress_TRANSFERENCODING = 2,
+    deflate_TRANSFERENCODING = 4,
+    gzip_TRANSFERENCODING = 8,
+    UNKNOWNTRANSFERENCODING = 16
+};
+#ifndef HTTP_SRC
+extern char *TRANSFERENCODINGSTXT[];
 #endif
 
 struct Headers {
@@ -62,21 +79,9 @@ char *str_method(enum HTTPMethod method);
 
 char *str_http_version(enum HTTPVersion version);
 
-struct PStr *str_header_list(const struct Headers *headers);
-
 struct PStr *str_request_headers(struct RequestHeaders *headers);
 
 struct PStr *str_response_headers(struct ResponseHeaders *headers);
-
-enum HTTPMethod parse_method(struct PStr *str);
-
-enum HTTPVersion parse_http_version(struct PStr *str);
-
-int parse_request_start_line(struct RequestHeaders *headers, struct PStr *start_line);
-
-int parse_response_start_line(struct ResponseHeaders *headers, struct PStr *start_line);
-
-struct Header *parse_header(struct PStr *txt);
 
 struct Headers *parse_headers(int isRequest, struct PStr *txt);
 
