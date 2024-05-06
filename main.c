@@ -77,7 +77,7 @@ struct PStr *forward(struct PStr *request) {
         free_ResponseHeaders(headers);
         return NULL;
     }
-    
+
     remove_header((struct Headers*)headers, "strict-transport-security");
     remove_header((struct Headers*)headers, "content-security-policy");
     // backwards compatibility:
@@ -86,7 +86,12 @@ struct PStr *forward(struct PStr *request) {
 
     struct PStr *redirect = get_header((struct Headers*)headers, "location");
     if (redirect != NULL) {
-        move_PStr(PStr_replace_once(redirect, TARGETHOSTNAME, strlen(TARGETHOSTNAME), OURHOSTNAME, strlen(OURHOSTNAME)), redirect);
+        struct PStr *wOurHostname = PStr_replace_once(
+            redirect, TARGETHOSTNAME, strlen(TARGETHOSTNAME),
+            OURHOSTNAME, strlen(OURHOSTNAME)
+        );
+        move_PStr(PStr_remove_once(wOurHostname, "www.", 4), redirect);
+        free_PStr(wOurHostname);
     }
 
     struct PStr *new_headers = str_response_headers(headers);
@@ -113,27 +118,29 @@ void accept_request(int server) {
     int remote = accept(server, (struct sockaddr*)&remote_addr, &remote_addr_size);
     set_basic_recv_sock(remote);
     recv_PStr recver = &recv_PStr_basic;
-    
-    struct PStr *req = new_PStr();
-    struct PStr *request_headers = recv_headers(req, recver);
+
+    struct PStr *req1 = new_PStr();
+    struct PStr *request_headers = recv_headers(req1, recver);
     if (request_headers == NULL) {
         close(remote);
-        free_PStr(req);
+        free_PStr(req1);
         return;
     }
-    
+
     struct RequestHeaders *headers = (struct RequestHeaders*)parse_headers(REQUEST, request_headers);
     if (headers == NULL) {
         close(remote);
-        free_PStr(req);
+        free_PStr(req1);
         free_PStr(request_headers);
         return;
     }
-    
+
+    struct PStr *req2 = clone_PStr(req1);
     struct PStr *request_body;
-    if (recv_body(req, request_headers, (struct Headers*)headers, recver, &request_body)) {
+    if (recv_body(req2, request_headers, (struct Headers*)headers, recver, &request_body)) {
         close(remote);
-        free_PStr(req);
+        free_PStr(req1);
+        free_PStr(req2);
         free_PStr(request_headers);
         free_RequestHeaders(headers);
         return;
@@ -145,7 +152,12 @@ void accept_request(int server) {
 
     set_header((struct Headers*)headers, "accept-encoding", "identity");
     
-    struct PStr *target_host = build_PStr("%s:%s", TARGETHOSTNAME, TARGETPORT);
+    struct PStr *target_host = build_PStr(
+#ifdef SEND_WWW
+    "www."
+#endif
+        "%s:%s", TARGETHOSTNAME, TARGETPORT
+    );
     set_header_PStr((struct Headers*)headers, "host", target_host);
     
     struct PStr *new_headers = str_request_headers(headers);
@@ -154,7 +166,8 @@ void accept_request(int server) {
         "%p%s%p", new_headers, HEADERSEND, request_body
     );
 
-    free_PStr(req);
+    free_PStr(req1);
+    free_PStr(req2);
     free_PStr(request_headers);
     free_RequestHeaders(headers);
     free_PStr(request_body);

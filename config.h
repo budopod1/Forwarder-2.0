@@ -1,21 +1,33 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#ifndef CONFIG_SRC
+/*
+Almost native experience:
+* en.wikipedia.org
+* github.com
+* opencv.org
+* google.com (requires SEND_WWW)
+Incomplete functionality:
+* codepen.io
+* web.archive.org
+* commons.wikimedia.org
+* nytimes.org (requires SEND_WWW)
+Does not work:
+* youtube.com
+*/
+#define TARGETHOSTNAME "google.com"
+#define TARGETPORT "443"
 
-extern char *TARGETHOSTNAME;
-extern char *TARGETPORT;
 #define USE_SSL
+// #define SEND_WWW
 
-extern char *OURHOSTNAME;
+#define OURHOSTNAME "cec60895-df5d-4c62-97c9-4b6c1f538a6a-00-2zvct7vdqwawt.kirk.replit.dev"
 
-extern char *SERVEPORT;
-extern int BACKLOG;
-extern int MAX_RECV;
+#define SERVEPORT "8080"
+#define BACKLOG 10
+#define MAX_RECV 4096
 
-extern int REQUEST;
-extern int RESPONSE;
-
-#endif
+#define REQUEST 1
+#define RESPONSE 0
 
 #endif

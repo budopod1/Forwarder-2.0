@@ -66,6 +66,8 @@ struct PStr *PStr_replace(struct PStr *str, char *from, int from_len, char *to, 
 
 struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char *to, int to_len);
 
+struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len);
+
 struct PStr *PStr_to_lower(struct PStr *str);
 
 struct PStr *_build_PStr(const char *fmt, va_list args);
