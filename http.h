@@ -16,9 +16,6 @@ struct Header {
 enum HTTPMethod {
     GET, POST, HEAD, OPTIONS, UNKNOWNMETHOD
 };
-#ifndef HTTP_SRC
-extern char *METHODSTXT[];
-#endif
 
 enum HTTPVersion {
     HTTP10,
@@ -26,9 +23,6 @@ enum HTTPVersion {
     HTTP20,
     UNKNOWNVERSION
 };
-#ifndef HTTP_SRC
-extern char *VERSIONSTXT[];
-#endif
 
 enum TransferEncoding {
     identity_TRANSFERENCODING = 0,
@@ -38,9 +32,14 @@ enum TransferEncoding {
     gzip_TRANSFERENCODING = 8,
     UNKNOWNTRANSFERENCODING = 16
 };
-#ifndef HTTP_SRC
-extern char *TRANSFERENCODINGSTXT[];
-#endif
+
+enum ContentType {
+    TEXTPLAIN_CONTENTTYPE,
+    TEXTHTML_CONTENTTYPE,
+    TEXTCSS_CONTENTTYPE,
+    TEXTJS_CONTENTTYPE,
+    IMAGEICON_CONTENTTYPE
+};
 
 struct Headers {
     enum HTTPVersion http_version;
@@ -65,6 +64,17 @@ struct ResponseHeaders {
     struct PStr *status;
 };
 
+enum Protocol_ {
+    HTTP, HTTPS, UNKNOWNPROTOCOL
+};
+
+struct Origin {
+    enum Protocol_ protocol;
+    int has_www;
+    char *hostname;
+    char *port;
+};
+
 void free_RequestHeaders(struct RequestHeaders *headers);
 
 void free_ResponseHeaders(struct ResponseHeaders *headers);
@@ -75,6 +85,8 @@ int recv_PStr_basic(struct PStr *str);
 
 int send_PStr(int sock, struct PStr *str);
 
+char *str_content_type(enum ContentType contentType);
+
 char *str_method(enum HTTPMethod method);
 
 char *str_http_version(enum HTTPVersion version);
@@ -83,7 +95,13 @@ struct PStr *str_request_headers(struct RequestHeaders *headers);
 
 struct PStr *str_response_headers(struct ResponseHeaders *headers);
 
+int uses_SSL(enum Protocol_ protocol);
+
+char *get_origin_port(struct Origin *origin);
+
 struct Headers *parse_headers(int isRequest, struct PStr *txt);
+
+struct Origin *parse_origin(struct PStr *text);
 
 void remove_header(struct Headers *headers, char *removee);
 
@@ -92,6 +110,10 @@ struct PStr *get_header(struct Headers *headers, char *key);
 void set_header(struct Headers *headers, char *key, char *value);
 
 void set_header_PStr(struct Headers *headers, char *key, struct PStr *value);
+
+void add_header(struct Headers *headers, char *key, struct PStr *value);
+
+void add_headers(struct Headers *headers, int count, char *keys[], char *values[]);
 
 struct PStr *recv_headers(struct PStr *req, recv_PStr recver);
 

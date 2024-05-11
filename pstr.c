@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 #include "pstr.h"
 
 struct PStr *new_PStr() {
@@ -148,6 +149,7 @@ int CStr_equals_PStr(char *cstr, struct PStr *pstr) {
 struct PStrPair *partition_PStr(struct PStr *txt, char *splitter, int splitter_len) {
     for (int i = 0; i <= txt->length - splitter_len; i++) {
         if (memcmp(txt->text + i, splitter, splitter_len) == 0) {
+            if (txt->capacity != -1) txt->capacity = -2;
             struct PStrPair *pair = malloc(sizeof(struct PStrPair));
             struct PStr *first = &pair->first;
             first->capacity = -1;
@@ -160,7 +162,6 @@ struct PStrPair *partition_PStr(struct PStr *txt, char *splitter, int splitter_l
             return pair;
         }
     }
-    if (txt->capacity != -1) txt->capacity = -2;
     return NULL;
 }
 
@@ -281,7 +282,7 @@ struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char 
     return result;
 }
 
-struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len) {
+struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len, int *did_remove) {
     for (int i = 0; i <= str->length - removee_len; i++) {
         if (memcmp(str->text + i, removee, removee_len) == 0) {
             int new_len = str->length - removee_len;
@@ -292,9 +293,11 @@ struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len) 
             memcpy(result->text, str->text, i);
             int rest = i + removee_len;
             memcpy(result->text+i, str->text+rest, str->length-rest);
+            if (did_remove != NULL) *did_remove = 1;
             return result;
         }
     }
+    if (did_remove != NULL) *did_remove = 0;
     return clone_PStr(str);
 }
 
@@ -311,6 +314,11 @@ struct PStr *PStr_to_lower(struct PStr *str) {
         result->text[i] = chr;
     }
     return result;
+}
+
+int PStr_starts_with(struct PStr *str, char *sub, int sublen) {
+    if (str->length < sublen) return 0;
+    return memcmp(str->text, sub, sublen) == 0;
 }
 
 struct PStr *_build_PStr(const char *fmt, va_list args) {
@@ -386,4 +394,48 @@ int CStr_parse_int(char *txt, int base, int *result) {
 int PStr_parse_int(struct PStr *str, int base, int *result) {
     char *cstr = CStr_from_PStr(str);
     return CStr_parse_int(cstr, base, result);
+}
+
+int int_pow(int base, int exponent) {
+    int result = 1;
+    while (exponent) {
+        if (exponent % 2) {
+            result *= base;
+            exponent--;
+        } else {
+            base *= base;
+            exponent /= 2;
+        }
+    }
+    return result;
+}
+
+struct PStr *PStr_from_int_len(int i, int digits) {
+    if (int_pow(10, digits) < i) {
+        printf("Not enough digits (only %d) allocated for stringification of %d\n", digits, i);
+        exit(1);
+    }
+    struct PStr *result = malloc(sizeof(struct PStr));
+    result->capacity = digits+1;
+    result->length = digits;
+    result->text = malloc(digits+1);
+    sprintf(result->text, "%d", i);
+    return result;
+}
+
+char *CStr_from_int(int i) {
+    char *buffer = malloc(1+(int)ceil(log(i)));
+    sprintf(buffer, "%d", i);
+    return buffer;
+}
+
+int MULTIPLIERS[] = {2, 3, 5, 7, 11, 13, 17};
+int MULTIPLIER_COUNT = 7;
+
+unsigned int dumb_hash(char *txt, int len) {
+    unsigned int total = 0;
+    for (int i = 0; i < len; i++) {
+        total += txt[i] * MULTIPLIERS[i % MULTIPLIER_COUNT];
+    }
+    return total;
 }

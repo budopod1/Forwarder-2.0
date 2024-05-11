@@ -66,9 +66,11 @@ struct PStr *PStr_replace(struct PStr *str, char *from, int from_len, char *to, 
 
 struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char *to, int to_len);
 
-struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len);
+struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len, int *did_remove);
 
 struct PStr *PStr_to_lower(struct PStr *str);
+
+int PStr_starts_with(struct PStr *str, char *sub, int sublen);
 
 struct PStr *_build_PStr(const char *fmt, va_list args);
 
@@ -79,6 +81,12 @@ void printf_PStr(const char *fmt, ...);
 int CStr_parse_int(char *txt, int base, int *result);
 
 int PStr_parse_int(struct PStr *str, int base, int *result);
+
+struct PStr *PStr_from_int_len(int i, int digits);
+
+char *CStr_from_int(int i);
+
+unsigned int dumb_hash(char *txt, int len);
 
 typedef int (*recv_PStr)(struct PStr *str);
 

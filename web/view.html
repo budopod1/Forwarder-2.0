@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="/forwarder/favicon.ico" id="favicon">
+    <title>Forwarder 2.0</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/forwarder/style.css">
+    <script src="/forwarder/script.js"></script>
+</head>
+<body>
+    <div id="content">
+        <nav>
+            <div id="tabs"><button id="new-tab-btn" class="tab">+</button></div>
+            <div id="tools">
+                <button id="back-btn" class="borderless-btn">⇦</button>
+                <div class="spacer-02"></div>
+                <button id="forward-btn" class="borderless-btn">⇨</button>
+                <div class="spacer-02"></div>    
+                <button id="reload-btn" class="borderless-btn">⟳</button>
+                <div class="spacer-1"></div>
+                <div>
+                    <button id="url-go" type="submit" form="url-bar-holder" class="right-connect">Go</button>
+                </div>
+                <form id="url-bar-holder">
+                    <input id="url-bar" type="text" class="left-connect" autocorrect="off" autocapitalize="none" required>
+                </form>
+                <div class="spacer-1"></div>
+                <button id="settings-btn" class="borderless-btn big-txt">⚙</button>
+            </div>
+        </nav>
+        <main></main>
+    </div>
+    <div id="settings-modal">
+        <h2>Settings</h2>
+        <div id="main-settings">
+            <div>
+                <label for="page-title">Tab Title</label>
+                <input id="page-title" value="Forwarder 2.0">
+            </div>
+            <div>
+                <label for="favicon-location">Icon Domain</label>
+                <input id="favicon-location" type="url">
+                <small class="note">(The domain that Forwarder copies the icon of)</small>
+            </div>
+        </div>
+        <div>
+            <button id="settings-modal-close">Close</button>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,4 +1,3 @@
-#define HTTP_SRC
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +10,9 @@
 char *METHODSTXT[] = {"GET", "POST", "HEAD", "OPTIONS"};
 char *VERSIONSTXT[] = {"HTTP/1.0", "HTTP/1.1", "HTTP/2.0"};
 char *TRANSFERENCODINGSTXT[] = {"identity", "chunked", "compress", "deflate", "gzip"};
+char *CONTENTTYPETXT[] = {"text/plain; charset=utf-8", "text/html; charset=utf-8", "text/css; charset=utf-8", "text/javascript; charset=utf-8", "image/x-icon"};
+char *PROTOCOLTXT[] = {"http", "https"};
+char *DEFAULTPROTOCOLPORTS[] = {"80", "443", NULL};
 
 void free_RequestHeaders(struct RequestHeaders *headers) {
     free_PStr(headers->url);
@@ -63,6 +65,10 @@ int send_PStr(int sock, struct PStr *str) {
     return 0;
 }
 
+char *str_content_type(enum ContentType contentType) {
+    return CONTENTTYPETXT[contentType];
+}
+
 char *str_method(enum HTTPMethod method) {
     return METHODSTXT[method];
 }
@@ -107,6 +113,19 @@ struct PStr *str_response_headers(struct ResponseHeaders *headers) {
     );
     free_PStr(header_list);
     return result;
+}
+
+int uses_SSL(enum Protocol_ protocol) {
+    return protocol = HTTPS;
+}
+
+char *get_origin_port(struct Origin *origin) {
+    if (origin->port != NULL) return origin->port;
+    return DEFAULTPROTOCOLPORTS[origin->protocol];
+}
+
+enum Protocol_ parse_protocol(struct PStr *str) {
+    return parse_enum(str, PROTOCOLTXT, UNKNOWNPROTOCOL);
 }
 
 enum HTTPMethod parse_method(struct PStr *str) {
@@ -225,6 +244,34 @@ struct Headers *parse_headers(int isRequest, struct PStr *txt) {
     return headers;
 }
 
+struct Origin *parse_origin(struct PStr *text) {
+    struct Origin *origin = malloc(sizeof(struct Origin));
+    struct PStrPair *pair1 = partition_PStr(text, "://", 3);
+    if (pair1 == NULL) return NULL;
+    origin->protocol = parse_protocol(&pair1->first);
+    if (origin->protocol == UNKNOWNPROTOCOL) {
+        free_PStrPair(pair1);
+        return NULL;
+    }
+    struct PStr *hostname;
+    char *port;
+    struct PStrPair *pair2 = partition_PStr(&pair1->second, ":", 1);
+    if (pair2 == NULL) {
+        hostname = &pair1->second;
+        port = NULL;
+    } else {
+        hostname = &pair2->first;
+        port = CStr_from_PStr(&pair2->second);
+    }
+    struct PStr *new_hostname = PStr_remove_once(hostname, "www.", 4, &origin->has_www);
+    origin->port = port;
+    origin->hostname = CStr_from_PStr(new_hostname);
+    free_PStr(new_hostname);
+    free_PStrPair(pair1);
+    if (pair2 != NULL) free_PStrPair(pair2);
+    return origin;
+}
+
 void remove_header(struct Headers *headers, char *removee) {
     for (int i = 0; i < headers->count; i++) {
         struct Header *header = headers->headers[i];
@@ -270,6 +317,29 @@ void set_header_PStr(struct Headers *headers, char *key, struct PStr *value) {
         headers->headers[headers->count-1] = header;
     } else {
         copy_to_PStr(value, old_val);
+    }
+}
+
+void add_header(struct Headers *headers, char *key, struct PStr *value) {
+    headers->headers = realloc(headers->headers, ++headers->count*sizeof(struct Header*));
+    struct Header *header = malloc(sizeof(struct Header));
+    CStr_copy_to_PStr(key, &header->key);
+    copy_to_PStr(value, &header->value);
+    headers->headers[headers->count-1] = header;
+}
+
+void add_headers(struct Headers *headers, int count, char *keys[], char *values[]) {
+    if (headers->headers != NULL) {
+        printf("Cannot add multiple headers when headers already exists\n");
+        exit(1);
+    }
+    headers->headers = malloc(sizeof(struct Header*) * count);
+    headers->count = count;
+    for (int i = 0; i < count; i++) {
+        struct Header *header = malloc(sizeof(struct Header));
+        CStr_copy_to_PStr(keys[i], &header->key);
+        CStr_copy_to_PStr(values[i], &header->value);
+        headers->headers[i] = header;
     }
 }
 

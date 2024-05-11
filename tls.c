@@ -72,7 +72,7 @@ SSL *upgrade_to_SSL(char *hostname, int sock) {
             ERR_print_errors_fp(stderr);
             SSL_shutdown(ssl);
             printf("Internal SSL error\n");
-            exit(1);
+            return NULL;
         default:
             ERR_print_errors_fp(stderr);
             printf("Unknown SSL error\n");

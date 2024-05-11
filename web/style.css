@@ -1,0 +1,182 @@
+:root {
+    --text-color: black;
+    --background-color: white;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    margin: 0;
+    font-family: "Roboto", sans-serif;
+    font-weight: 300;
+    font-style: normal;
+    color: var(--text-color);
+    background-color: var(--background-color);
+}
+
+h1, h2, h3, h4, h5, h6 {
+    margin: 0;
+}
+
+label {
+    min-width: 15ch;
+    display: inline-block;
+}
+
+#content {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+nav {
+    height: 5rem;
+    padding: 0 0.5rem;
+    border-bottom: solid 1px black;
+    display: flex;
+    flex-direction: column;
+}
+
+nav > * {
+    flex-basis: 0;
+    flex-grow: 1;
+    margin: 0.2rem 0;
+}
+
+#tools {
+    display: flex;
+    align-items: center;
+}
+
+#url-bar {
+    width: 100%;
+}
+
+#url-bar-holder {
+    flex-grow: 1;
+}
+
+.spacer-02 {
+    width: 0.2rem;
+}
+
+.spacer-1 {
+    width: 1rem;
+}
+
+#tabs {
+    display: flex;
+    align-items: center;
+}
+
+.current-tab {
+    background-color: var(--text-color);
+    color: var(--background-color);
+}
+
+.close-tab-btn {
+    margin-left: 0.5rem;
+}
+
+#new-tab-btn {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+main {
+    flex-grow: 1;
+}
+
+section {
+    width: 100%;
+    height: 100%;
+    display: block;
+    overflow: hidden;
+}
+
+section iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+#settings-modal {
+    position: absolute;
+    z-index: 1;
+    top: 15vh;
+    bottom: 15vh;
+    left: 15vh;
+    right: 15vh;
+    background-color: var(--background-color);
+    border: solid 1px black;
+    padding: 1rem;
+    display: none;
+    flex-direction: column;
+}
+
+@media (max-height: 750px) {
+    #settings-modal {
+        top: 1rem;
+        bottom: 1rem;
+    }
+}
+
+@media (max-width: 750px) {
+    #settings-modal {
+        left: 1rem;
+        right: 1rem;
+    }
+}
+
+#main-settings {
+    flex-grow: 1;
+    margin: 1rem 0;
+}
+
+#main-settings > div {
+    margin: 0.75rem 0;
+}
+
+input, textarea, button {
+    font: inherit;
+    background: none;
+    cursor: pointer;
+    color: inherit;
+    border: solid 1px black;
+}
+
+input, button {
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    margin: 0 0.25rem;
+}
+
+.right-connect {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: none;
+    margin-right: 0;
+}
+
+.left-connect {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    margin-left: 0;
+}
+
+.borderless-btn, .close-tab-btn {
+    border: none;
+    padding: 0;
+}
+
+.big-txt {
+    font-size: 1.5rem;
+}
+
+.note {
+    margin-left: 0.5rem;
+    display: block; 
+}
