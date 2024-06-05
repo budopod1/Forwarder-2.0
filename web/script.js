@@ -107,7 +107,10 @@ function proccessLink(tab, a) {
         if (tab.origin == hrefURL.origin) {
             a.setAttribute("href", urlPath(hrefURL));
         } else {
-            // patch the url to call setOrigin here
+            a.setAttribute("href", "#");
+            a.addEventListener("click", () => {
+                navigateToPage(hrefURL.toString());
+            });
         }
     }
 }
