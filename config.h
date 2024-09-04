@@ -26,7 +26,7 @@ Does not work:
 #define SEND_WWW
 */
 
-#define OURHOSTNAME "cec60895-df5d-4c62-97c9-4b6c1f538a6a-00-2zvct7vdqwawt.kirk.repl.co"
+#define OURHOSTNAME "cec60895-df5d-4c62-97c9-4b6c1f538a6a-00-2zvct7vdqwawt.kirk.replit.dev"
 
 #define SPECIALURL "/forwarder"
 #define VIEWURL "/view"

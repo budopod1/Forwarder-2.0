@@ -26,7 +26,7 @@ function setFavicon(href) {
 }
 
 async function setOrigin(origin) {
-    if (origin == null || currentOrigin == origin) return;
+    if (origin == null || currentOrigin == origin) return true;
     let response = await fetch(THIS_ORIGIN + "/forwarder/change_origin", {
         "method": "POST", "body": origin
     });
@@ -71,14 +71,17 @@ function urlPath(url) {
     return url.pathname + url.search + url.hash
 }
 
-async function updateTabURL(tab, url) {
+function displayTabURL(tab, url) {
     tab.url = urlPath(url);
     let origin = getTabOrigin(tab);
-    if (tab.showing) 
-        if (!await setOrigin(tab.origin)) return false;
     tab.displayedURL = origin == null ? "" : origin + tab.url;
     if (tab.showing)
         urlBarInput.value = tab.displayedURL;
+}
+
+async function setTabURL(tab, url) {
+    if (!await setOrigin(tab.origin)) return false;
+    displayTabURL(tab, url);
     return true;
 }
 
@@ -95,6 +98,17 @@ async function closeTab(tab) {
     }
 }
 
+async function specialURLRedirect(tab) {
+    if (tab.origin == null) return false;
+    if (tab.origin.includes("youtube.com")
+        && tab.url.startsWith("/watch")) {
+        let params = new URLSearchParams(location.search);
+        await navigateToPage(tab, `https://www.youtube-nocookie.com/embed/${params.get("v")}`);
+        return true;
+    }
+    return false;
+}
+
 function proccessLink(tab, a) {
     let target = a.getAttribute("target");
     if (target != "_blank") {
@@ -108,9 +122,9 @@ function proccessLink(tab, a) {
             a.setAttribute("href", urlPath(hrefURL));
         } else {
             a.setAttribute("href", "#");
-            a.addEventListener("click", () => {
-                navigateToPage(hrefURL.toString());
-            });
+            a.addEventListener("click", () => 
+                navigateToPage(tab, hrefURL.toString())
+            );
         }
     }
 }
@@ -149,7 +163,9 @@ async function addNewTab() {
     iframe.addEventListener("load", () => {
         iframe.addEventListener('load', () => {
             (async () => {
+                if (iframe.contentDocument == null) return;
                 let idocument = iframe.contentWindow.document;
+                let ilocation = iframe.contentWindow.location;
                 
                 let bases = idocument.getElementsByTagName("base");
                 for (let base of bases) {
@@ -160,8 +176,11 @@ async function addNewTab() {
                 for (let a of as) {
                     proccessLink(tab, a);
                 }
-                
-                await updateTabURL(tab, iframe.contentWindow.location);
+
+                await displayTabURL(tab, ilocation);
+                if (await specialURLRedirect(tab)) {
+                    return;
+                }
                 
                 let title = idocument.querySelector("title");
                 tab.name = title == null ? tab.displayedURL : title.innerText;
@@ -172,12 +191,12 @@ async function addNewTab() {
             })();
         });
         iframe.src = THIS_ORIGIN + url;
-    }, { once: true });
+    }, {once: true});
     section.appendChild(iframe);
     mainElem.appendChild(section);
 }
 
-async function navigateToPage(urlTxt) {
+async function navigateToPage(tab, urlTxt) {
     let slashIndex = urlTxt.indexOf("://");
     if (slashIndex == -1) {
         urlTxt = "https://" + urlTxt;
@@ -187,9 +206,9 @@ async function navigateToPage(urlTxt) {
     if (dotIndex == -1) {
         url.hostname += ".com";
     }
-    currentTab.origin = url.origin;
-    if (await updateTabURL(currentTab, url)) {
-        currentTab.iframe.src = currentTab.url;
+    tab.origin = url.origin;
+    if (await setTabURL(tab, url)) {
+        tab.iframe.src = tab.url;
     }
 }
 
@@ -219,7 +238,7 @@ onload = () => {
 
     document.getElementById("url-bar-holder").onsubmit = (e) => {
         e.preventDefault();
-        navigateToPage(urlBarInput.value);
+        navigateToPage(currentTab, urlBarInput.value);
     };
 
     document.getElementById("settings-btn").onclick = () => {

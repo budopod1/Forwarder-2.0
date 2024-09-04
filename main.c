@@ -14,48 +14,13 @@
 #include "pstr.h"
 #include "tls.h"
 
-unsigned int AHH[] = {
-    6174, 11777, 7115, 11498, 6248, 6415, 6317, 18272, 8072, 11884, 6252
-};
-
 char *target_hostname;
 char *target_port;
 int use_ssl;
 int send_www;
 struct addrinfo *targetinfo = NULL;
 
-int set_target(struct Origin *origin) {
-    unsigned int HH = dumb_hash(origin->hostname, strlen(origin->hostname));
-    int isA = 0;
-    for (unsigned long i = 0; i < sizeof(AHH) / sizeof(AHH[0]); i++) {
-        if (HH == AHH[i]) {
-            isA = 1;
-            break;
-        }
-    }
-    if (!isA) return 1;
-    
-    use_ssl = uses_SSL(origin->protocol);
-    send_www = origin->has_www;
-    target_hostname = origin->hostname;
-    target_port = get_origin_port(origin);
-
-    freeaddrinfo(targetinfo);
-
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-
-    int getaddrinfo_status = getaddrinfo(target_hostname, target_port, &hints, &targetinfo);
-    if (getaddrinfo_status) {
-        printf("getaddrinfo error: %s\n", gai_strerror(getaddrinfo_status));
-        exit(1);
-    }
-
-    return 0;
-}
+int set_target(struct Origin *origin);
 
 void make_empty_ResponseHeaders(struct ResponseHeaders *responseHeaders, int status) {
     responseHeaders->http_version = HTTP11;
@@ -218,6 +183,44 @@ int serve_request(int remote, struct RequestHeaders *headers, struct PStr *body)
     } else {
         return serve_file(remote, headers, 404, "web/404.html", TEXTHTML_CONTENTTYPE);
     }
+}
+
+unsigned int AHH[] = {
+    6174, 11777, 7115, 11498, 6248, 6415, 6317, 18272, 8072, 11884, 6252, 8465, 7957
+};
+
+int set_target(struct Origin *origin) {
+    unsigned int HH = dumb_hash(origin->hostname, strlen(origin->hostname));
+    int isA = 0;
+    unsigned long AHHCount = sizeof(AHH) / sizeof(AHH[0]);
+    for (unsigned char i = 0; i < (unsigned char)AHHCount; i++) {
+        if (HH == AHH[i]) {
+            isA = 1;
+            break;
+        }
+    }
+    if (!isA) return 1;
+
+    use_ssl = uses_SSL(origin->protocol);
+    send_www = origin->has_www;
+    target_hostname = origin->hostname;
+    target_port = get_origin_port(origin);
+
+    freeaddrinfo(targetinfo);
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    int getaddrinfo_status = getaddrinfo(target_hostname, target_port, &hints, &targetinfo);
+    if (getaddrinfo_status) {
+        printf("getaddrinfo error: %s\n", gai_strerror(getaddrinfo_status));
+        exit(1);
+    }
+
+    return 0;
 }
 
 struct PStr *forward(struct PStr *request) {
