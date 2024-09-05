@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <threads.h>
 #include "config.h"
 #include "pstr.h"
 #include "utils.h"
@@ -32,7 +33,7 @@ void free_ResponseHeaders(struct ResponseHeaders *headers) {
     free(headers);
 }
 
-int BASIC_RECV_SOCK;
+thread_local int BASIC_RECV_SOCK;
 
 void set_basic_recv_sock(int sock) {
     BASIC_RECV_SOCK = sock;
@@ -116,7 +117,7 @@ struct PStr *str_response_headers(struct ResponseHeaders *headers) {
 }
 
 int uses_SSL(enum Protocol_ protocol) {
-    return protocol = HTTPS;
+    return protocol == HTTPS;
 }
 
 char *get_origin_port(struct Origin *origin) {

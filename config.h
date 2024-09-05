@@ -39,6 +39,7 @@ Does not work:
 #define SERVEPORT "8080"
 #define BACKLOG 10
 #define MAX_RECV 4096
+#define MAX_THREAD_COUNT 10
 
 #define REQUEST 1
 #define RESPONSE 0

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <stdarg.h>
 #include <sys/types.h>
@@ -9,18 +10,63 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdatomic.h>
+#include <pthread.h>
 #include "config.h"
 #include "http.h"
 #include "pstr.h"
 #include "tls.h"
 
-char *target_hostname;
-char *target_port;
-int use_ssl;
-int send_www;
-struct addrinfo *targetinfo = NULL;
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+char *locked_target_hostname;
+char *locked_target_port;
+bool locked_use_ssl;
+bool locked_send_www;
+struct addrinfo *locked_targetinfo = NULL;
 
-int set_target(struct Origin *origin);
+struct ThreadData {
+    pthread_t id;
+    void *payload;
+    void (*func)(void *data);
+    atomic_bool is_running;
+};
+struct ThreadData threads_data[MAX_THREAD_COUNT];
+
+bool set_target(struct Origin *origin);
+
+int get_free_thread_idx() {
+    for (int i = 0; i < MAX_THREAD_COUNT; i++) {
+        if (!threads_data[i].is_running) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void thread_cleanup(void *data_ptr) {
+    ((struct ThreadData*)data_ptr)->is_running = false;
+}
+
+void *thread_entry(void *data_ptr) {
+    pthread_cleanup_push(&thread_cleanup, data_ptr);
+    struct ThreadData *data = (struct ThreadData*)data_ptr;
+    (*data->func)(data->payload);
+    pthread_cleanup_pop(1);
+    return NULL;
+}
+
+int start_thread(void (*func)(void *payload), void *payload) {
+    int idx = get_free_thread_idx();
+    if (idx == -1) return -1;
+    struct ThreadData *thread_data = &threads_data[idx];
+    thread_data->payload = payload;
+    thread_data->func = func;
+    thread_data->is_running = true;
+    if (pthread_create(&thread_data->id, NULL, &thread_entry, thread_data)) {
+        return -1;
+    }
+    return idx;
+}
 
 void make_empty_ResponseHeaders(struct ResponseHeaders *responseHeaders, int status) {
     responseHeaders->http_version = HTTP11;
@@ -171,7 +217,7 @@ int serve_request(int remote, struct RequestHeaders *headers, struct PStr *body)
     } else if (CStr_equals_PStr(SPECIALURL CHANGEORIGINURL, headers->url)) {
         struct Origin *origin = parse_origin(body);
         if (origin == NULL) return 1;
-        int set_target_status = set_target(origin);
+        bool set_target_status = set_target(origin);
         free(origin);
         if (set_target_status) {
             return serve_empty(remote, 403);
@@ -189,24 +235,26 @@ unsigned int AHH[] = {
     6174, 11777, 7115, 11498, 6248, 6415, 6317, 18272, 8072, 11884, 6252, 8465, 7957
 };
 
-int set_target(struct Origin *origin) {
+bool set_target(struct Origin *origin) {
     unsigned int HH = dumb_hash(origin->hostname, strlen(origin->hostname));
-    int isA = 0;
+    bool isA = false;
     unsigned long AHHCount = sizeof(AHH) / sizeof(AHH[0]);
     for (unsigned char i = 0; i < (unsigned char)AHHCount; i++) {
         if (HH == AHH[i]) {
-            isA = 1;
+            isA = true;
             break;
         }
     }
-    if (!isA) return 1;
+    // if (!isA) return true;
 
-    use_ssl = uses_SSL(origin->protocol);
-    send_www = origin->has_www;
-    target_hostname = origin->hostname;
-    target_port = get_origin_port(origin);
+    pthread_mutex_lock(&lock);
 
-    freeaddrinfo(targetinfo);
+    locked_target_hostname = origin->hostname;
+    locked_target_port = get_origin_port(origin);
+    locked_use_ssl = uses_SSL(origin->protocol);
+    locked_send_www = origin->has_www;
+
+    freeaddrinfo(locked_targetinfo);
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -214,16 +262,19 @@ int set_target(struct Origin *origin) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    int getaddrinfo_status = getaddrinfo(target_hostname, target_port, &hints, &targetinfo);
+    int getaddrinfo_status = getaddrinfo(locked_target_hostname, locked_target_port, &hints, &locked_targetinfo);
+    
+    pthread_mutex_unlock(&lock);
+    
     if (getaddrinfo_status) {
         printf("getaddrinfo error: %s\n", gai_strerror(getaddrinfo_status));
         exit(1);
     }
 
-    return 0;
+    return false;
 }
 
-struct PStr *forward(struct PStr *request) {
+void handle_forwarding(int remote, struct PStr *request, char *target_hostname, bool use_ssl, bool send_www, struct addrinfo *targetinfo) {
     int target = socket(targetinfo->ai_family, 
         targetinfo->ai_socktype, targetinfo->ai_protocol);
     if (target == -1) {
@@ -242,11 +293,11 @@ struct PStr *forward(struct PStr *request) {
     if (use_ssl) {
         ssl = upgrade_to_SSL(target_hostname, target);
     
-        if (ssl == NULL) return NULL;
+        if (ssl == NULL) return;
     
         if (send_PStr_SSL(ssl, request)) {
             printf("failed to forward request through SSL\n");
-            return NULL;
+            return;
         }
 
         set_SSL_recv(ssl);
@@ -254,7 +305,7 @@ struct PStr *forward(struct PStr *request) {
     } else {
         if (send_PStr(target, request)) {
             printf("failed to forward request\n");
-            return NULL;
+            return;
         }
         
         set_basic_recv_sock(target);
@@ -266,7 +317,7 @@ struct PStr *forward(struct PStr *request) {
     if (response_headers == NULL) {
         close(target);
         free_PStr(res1);
-        return NULL;
+        return;
     }
 
     struct ResponseHeaders *headers = (struct ResponseHeaders*)parse_headers(RESPONSE, response_headers);
@@ -274,16 +325,16 @@ struct PStr *forward(struct PStr *request) {
         close(target);
         free_PStr(res1);
         free_PStr(response_headers);
-        return NULL;
+        return;
     }
 
-    if (headers->http_version != HTTP11) {
+    if (headers->http_version > HTTP11) {
         close(target);
         free_PStr(res1);
         free_PStr(response_headers);
         free_ResponseHeaders(headers);
         printf("Only http version 1.1 is supported for responses\n");
-        return NULL;
+        return;
     }
 
     struct PStr *res2 = clone_PStr(res1);
@@ -295,7 +346,7 @@ struct PStr *forward(struct PStr *request) {
         free_PStr(res2);
         free_PStr(response_headers);
         free_ResponseHeaders(headers);
-        return NULL;
+        return;
     }
 
     set_header((struct Headers*)headers, "cache-control", "no-store");
@@ -309,6 +360,7 @@ struct PStr *forward(struct PStr *request) {
 
     struct PStr *redirect = get_header((struct Headers*)headers, "location");
     if (redirect != NULL) {
+        // TODO: make this work for redirects to different domains
         struct PStr *wOurHostname = PStr_replace_once(
             redirect, target_hostname, strlen(target_hostname),
             OURHOSTNAME, strlen(OURHOSTNAME)
@@ -319,7 +371,7 @@ struct PStr *forward(struct PStr *request) {
 
     struct PStr *new_headers = str_response_headers(headers);
 
-    struct PStr *result = build_PStr(
+    struct PStr *response = build_PStr(
         "%p"HEADERSEND"%p", new_headers, response_body
     );
 
@@ -332,13 +384,56 @@ struct PStr *forward(struct PStr *request) {
 
     close(target);
 
-    return result;
+    int send_status = send_PStr(remote, response);
+    free_PStr(response);
+    if (send_status) {
+        printf("Failed to send response to client\n");
+        return;
+    }
 }
 
-void accept_request(int server) {
-    struct sockaddr_storage remote_addr;
-    socklen_t remote_addr_size = sizeof(remote_addr);
-    int remote = accept(server, (struct sockaddr*)&remote_addr, &remote_addr_size);
+void read_forwarding_request(int remote, struct RequestHeaders *headers, struct PStr *request_body, char *target_hostname, char *target_port, bool use_ssl, bool send_www, struct addrinfo *targetinfo) {
+    remove_header((struct Headers*)headers, "referer");
+
+    set_header((struct Headers*)headers, "user-agent", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+
+    set_header((struct Headers*)headers, "accept-encoding", "identity");
+
+    char *host_template;
+    if (send_www) {
+        host_template = "www.%s:%s";
+    } else {
+        host_template = "%s:%s";
+    }
+    struct PStr *target_host = build_PStr(
+        host_template, target_hostname, target_port
+    );
+    set_header_PStr((struct Headers*)headers, "host", target_host);
+
+    struct PStr *new_headers = str_request_headers(headers);
+
+    struct PStr *forwardee = build_PStr(
+        "%p"HEADERSEND"%p", new_headers, request_body
+    );
+    free_PStr(new_headers);
+
+    handle_forwarding(remote, forwardee, target_hostname, use_ssl, send_www, targetinfo);
+
+    free_PStr(forwardee);
+}
+
+void handle_request(void *remote_storage) {
+    int remote = *(int*)remote_storage;
+    free(remote_storage);
+    
+    pthread_mutex_lock(&lock);
+    char *target_hostname = locked_target_hostname;
+    char *target_port = locked_target_port;
+    bool use_ssl = locked_use_ssl;
+    bool send_www = locked_use_ssl;
+    struct addrinfo *targetinfo = locked_targetinfo;
+    pthread_mutex_unlock(&lock);
+    
     set_basic_recv_sock(remote);
     recv_PStr recver = &recv_PStr_basic;
 
@@ -358,7 +453,7 @@ void accept_request(int server) {
         return;
     }
 
-    if (headers->http_version != HTTP11) {
+    if (headers->http_version > HTTP11) {
         close(remote);
         free_PStr(req1);
         free_PStr(request_headers);
@@ -380,71 +475,34 @@ void accept_request(int server) {
 
     if (PStr_starts_with(headers->url, SPECIALURL, strlen(SPECIALURL))) {
         serve_request(remote, headers, request_body);
-
-        free_PStr(req1);
-        free_PStr(req2);
-        free_PStr(request_headers);
-        free_RequestHeaders(headers);
-        free_PStr(request_body);
-
-        close(remote);
     } else if (targetinfo == NULL) {
         serve_redirect(remote, headers, 307, SPECIALURL VIEWURL);
-
-        free_PStr(req1);
-        free_PStr(req2);
-        free_PStr(request_headers);
-        free_RequestHeaders(headers);
-        free_PStr(request_body);
-
-        close(remote);
     } else {
-        remove_header((struct Headers*)headers, "referer");
+        read_forwarding_request(remote, headers, request_body, target_hostname, target_port, use_ssl, send_www, targetinfo);
+    }
 
-        set_header((struct Headers*)headers, "user-agent", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
+    free_PStr(request_headers);
+    free_RequestHeaders(headers);
+    free_PStr(req1);
+    free_PStr(req2);
+    free_PStr(request_body);
+    close(remote);
+}
 
-        set_header((struct Headers*)headers, "accept-encoding", "identity");
+void server_loop(int server) {
+    while (1) {
+        struct sockaddr_storage remote_addr;
+        socklen_t remote_addr_size = sizeof(remote_addr);
+        int remote = accept(server, (struct sockaddr*)&remote_addr, &remote_addr_size);
 
-        char *host_template;
-        if (send_www) {
-            host_template = "www.%s:%s";
-        } else {
-            host_template = "%s:%s";
-        }
-        struct PStr *target_host = build_PStr(
-            host_template, target_hostname, target_port
-        );
-        set_header_PStr((struct Headers*)headers, "host", target_host);
+        int *remote_storage = malloc(sizeof(int));
+        *remote_storage = remote;
 
-        struct PStr *new_headers = str_request_headers(headers);
-        
-        free_PStr(request_headers);
-        free_RequestHeaders(headers);
-
-        struct PStr *forwardee = build_PStr(
-            "%p"HEADERSEND"%p", new_headers, request_body
-        );
-        free_PStr(req1);
-        free_PStr(req2);
-        free_PStr(new_headers);
-        free_PStr(request_body);
-
-        struct PStr *response = forward(forwardee);
-
-        free_PStr(forwardee);
-
-        if (response == NULL) {
-            close(remote);
-            printf("NULL response\n");
-            return;
-        }
-
-        int send_status = send_PStr(remote, response);
-        free_PStr(response);
-        close(remote);
-        if (send_status) {
-            printf("Failed to send response to client\n");
-            return;
+        int thread_idx = start_thread(&handle_request, remote_storage);
+        if (thread_idx == -1) {
+            // We can't create a thread for some reason, do this operation
+            // on the main thread instead
+            handle_request(remote_storage);
         }
     }
 }
@@ -489,10 +547,12 @@ int main() {
         exit(1);
     }
 
-    while (1) {
-        accept_request(server);
-    }
+    server_loop(server);
 
-    freeaddrinfo(targetinfo);
+    pthread_mutex_lock(&lock);
+    freeaddrinfo(locked_targetinfo);
     freeaddrinfo(serverinfo);
+    pthread_mutex_unlock(&lock);
+    
+    return 0;
 }

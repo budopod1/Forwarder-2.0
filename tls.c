@@ -6,6 +6,7 @@
 #include <openssl/conf.h>
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
+#include <threads.h>
 #include "pstr.h"
 #include "config.h"
 
@@ -82,7 +83,7 @@ SSL *upgrade_to_SSL(char *hostname, int sock) {
     return ssl;
 }
 
-SSL *SSL_RECV;
+thread_local SSL *SSL_RECV;
 
 void set_SSL_recv(SSL *ssl) {
     SSL_RECV = ssl;

@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -282,7 +283,7 @@ struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char 
     return result;
 }
 
-struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len, int *did_remove) {
+struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len, bool *did_remove) {
     for (int i = 0; i <= str->length - removee_len; i++) {
         if (memcmp(str->text + i, removee, removee_len) == 0) {
             int new_len = str->length - removee_len;
