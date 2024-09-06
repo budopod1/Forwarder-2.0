@@ -127,6 +127,37 @@ function proccessLink(tab, a) {
             );
         }
     }
+    if (a.id == "forwarder-2-redirect") {
+        a.click();
+    }
+}
+
+async function iframeHandler(tab, iframe) {
+    if (iframe.contentDocument == null) return;
+    let idocument = iframe.contentWindow.document;
+    let ilocation = iframe.contentWindow.location;
+
+    let bases = idocument.getElementsByTagName("base");
+    for (let base of bases) {
+        base.remove();
+    }
+
+    let as = idocument.getElementsByTagName("a");
+    for (let a of as) {
+        proccessLink(tab, a);
+    }
+
+    await displayTabURL(tab, ilocation);
+    if (await specialURLRedirect(tab)) {
+        return;
+    }
+
+    let title = idocument.querySelector("title");
+    tab.name = title == null ? tab.displayedURL : title.innerText;
+    if (tab.name.length > URL_SHOW_AMOUNT) {
+        tab.name = tab.name.slice(0, URL_SHOW_AMOUNT).trimEnd() + "...";
+    }
+    updateTabName(tab);
 }
 
 async function addNewTab() {
@@ -161,34 +192,8 @@ async function addNewTab() {
     await switchTab(tab);
     
     iframe.addEventListener("load", () => {
-        iframe.addEventListener('load', () => {
-            (async () => {
-                if (iframe.contentDocument == null) return;
-                let idocument = iframe.contentWindow.document;
-                let ilocation = iframe.contentWindow.location;
-                
-                let bases = idocument.getElementsByTagName("base");
-                for (let base of bases) {
-                    base.remove();
-                }
-    
-                let as = idocument.getElementsByTagName("a");
-                for (let a of as) {
-                    proccessLink(tab, a);
-                }
-
-                await displayTabURL(tab, ilocation);
-                if (await specialURLRedirect(tab)) {
-                    return;
-                }
-                
-                let title = idocument.querySelector("title");
-                tab.name = title == null ? tab.displayedURL : title.innerText;
-                if (tab.name.length > URL_SHOW_AMOUNT) {
-                    tab.name = tab.name.slice(0, URL_SHOW_AMOUNT).trimEnd() + "...";
-                }
-                updateTabName(tab);
-            })();
+        iframe.addEventListener("load", () => {
+            iframeHandler(tab, iframe);
         });
         iframe.src = THIS_ORIGIN + url;
     }, {once: true});

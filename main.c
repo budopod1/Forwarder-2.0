@@ -83,49 +83,42 @@ void make_HTTP_date(char buffer[64]) {
     strftime(buffer, 63, "%a, %d %b %Y %T %Z", timeinfo);
 }
 
+struct PStr *render_template(char *path, int pairCount, char *keys[], struct PStr *vals[]) {
+    struct PStr *result = read_file(path);
+    for (int i = 0; i < pairCount; i++) {
+        char *key = keys[i];
+        int key_len = strlen(key);
+        int from_len = key_len + 2;
+        char *from = malloc(from_len);
+        from[0] = '{';
+        memcpy(from + 1, key, key_len);
+        from[from_len - 1] = '}';
+        struct PStr *to = vals[i];
+        PStr_replace_inline(result, from, from_len, to->text, to->length);
+    }
+    return result;
+}
+
 int send_special_response(int remote, struct PStr *response) {
     int send_status = send_PStr(remote, response);
     free_PStr(response);
     if (send_status) {
-        printf("Failed to send special url response\n");
+        printf("Failed to send special response\n");
         return 1;
     }
 
     return 0;
 }
 
-int serve_file(int remote, struct RequestHeaders *request, int status, char *path, enum ContentType contentType) {
-    // https://stackoverflow.com/a/14002993
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        printf("Failed to find requested file %s\n", path);
-        return 1;
-    }
-    
-    fseek(file, 0, SEEK_END);
-    int fileSize = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char *bodyBuffer = malloc(fileSize);
-    if (fread(bodyBuffer, fileSize, 1, file) < 1) {
-        printf("Failed to load requested file %s\n", path);
-        return 1;
-    }
-    fclose(file);
-    
-    struct PStr body;
-    body.text = bodyBuffer;
-    body.length = fileSize;
-    body.capacity = -1;
-
+bool serve_content(int remote, int status, char *content, int contentLength, enum ContentType contentType) {
     struct ResponseHeaders responseHeaders;
     make_empty_ResponseHeaders(&responseHeaders, status);
 
     char date[64];
     make_HTTP_date(date);
 
-    char *contentLength = CStr_from_int(fileSize);
-    add_headers((struct Headers*)&responseHeaders, 3, (char*[]) {
+    char *contentLengthStr = CStr_from_int(contentLength);
+    add_headers((struct Headers*)&responseHeaders, 4, (char*[]) {
         "connection",
         "content-type",
         "date",
@@ -136,20 +129,31 @@ int serve_file(int remote, struct RequestHeaders *request, int status, char *pat
         str_content_type(contentType),
         date,
         SERVERNAME,
-        contentLength
+        contentLengthStr
     });
-    free(contentLength);
+    free(contentLengthStr);
+
+    struct PStr contentPStr = {-1, contentLength, content};
 
     struct PStr *responseHeadersTxt = str_response_headers(&responseHeaders);
-    struct PStr *response = build_PStr("%p"HEADERSEND"%p", responseHeadersTxt, &body);
+    struct PStr *response = build_PStr("%p"HEADERSEND"%p", responseHeadersTxt, &contentPStr);
 
     free_PStr(responseHeadersTxt);
-    free(bodyBuffer);
 
     return send_special_response(remote, response);
 }
 
-int serve_redirect(int remote, struct RequestHeaders *headers, int status, char *url) {
+bool serve_file(int remote, struct RequestHeaders *request, int status, char *path, enum ContentType contentType) {
+    struct PStr *str = read_file(path);
+
+    bool success = serve_content(remote, status, str->text, str->length, contentType);
+
+    free_PStr(str);
+
+    return success;
+}
+
+bool serve_redirect(int remote, struct RequestHeaders *headers, int status, char *url) {
     struct ResponseHeaders responseHeaders;
     make_empty_ResponseHeaders(&responseHeaders, status);
 
@@ -170,39 +174,25 @@ int serve_redirect(int remote, struct RequestHeaders *headers, int status, char 
 
     struct PStr *responseHeadersTxt = str_response_headers(&responseHeaders);
     struct PStr *response = build_PStr("%p"HEADERSEND, responseHeadersTxt);
-    
+
     free_PStr(responseHeadersTxt);
 
     return send_special_response(remote, response);
 }
 
-int serve_empty(int remote, int status) {
-    struct ResponseHeaders responseHeaders;
-    make_empty_ResponseHeaders(&responseHeaders, status);
+bool serve_empty(int remote, int status) {
+    return serve_content(remote, status, "", 0, TEXTPLAIN_CONTENTTYPE);
+}
 
-    char date[64];
-    make_HTTP_date(date);
-
-    add_headers((struct Headers*)&responseHeaders, 4, (char*[]) {
-        "connection",
-        "content-type",
-        "date",
-        "server",
-        "content-length"
-    }, (char*[]) {
-        "close",
-        str_content_type(TEXTPLAIN_CONTENTTYPE),
-        date,
-        SERVERNAME,
-        "0"
+bool serve_forward_redirect(int remote, struct PStr *target) {
+    struct PStr *rendered = render_template("web/redirect.html", 1, (char*[]) {
+        "url"
+    }, (struct PStr*[]) {
+        target
     });
-
-    struct PStr *responseHeadersTxt = str_response_headers(&responseHeaders);
-    struct PStr *response = build_PStr("%p"HEADERSEND, responseHeadersTxt);
-
-    free_PStr(responseHeadersTxt);
-
-    return send_special_response(remote, response);
+    bool success = serve_content(remote, 200, rendered->text, rendered->length, TEXTHTML_CONTENTTYPE);
+    free_PStr(rendered);
+    return success;
 }
 
 int serve_request(int remote, struct RequestHeaders *headers, struct PStr *body) {
@@ -245,7 +235,7 @@ bool set_target(struct Origin *origin) {
             break;
         }
     }
-    // if (!isA) return true;
+    if (!isA) return true;
 
     pthread_mutex_lock(&lock);
 
@@ -263,9 +253,9 @@ bool set_target(struct Origin *origin) {
     hints.ai_flags = AI_PASSIVE;
 
     int getaddrinfo_status = getaddrinfo(locked_target_hostname, locked_target_port, &hints, &locked_targetinfo);
-    
+
     pthread_mutex_unlock(&lock);
-    
+
     if (getaddrinfo_status) {
         printf("getaddrinfo error: %s\n", gai_strerror(getaddrinfo_status));
         exit(1);
@@ -289,12 +279,12 @@ void handle_forwarding(int remote, struct PStr *request, char *target_hostname, 
 
     SSL *ssl;
     recv_PStr recver;
-    
+
     if (use_ssl) {
         ssl = upgrade_to_SSL(target_hostname, target);
-    
+
         if (ssl == NULL) return;
-    
+
         if (send_PStr_SSL(ssl, request)) {
             printf("failed to forward request through SSL\n");
             return;
@@ -307,7 +297,7 @@ void handle_forwarding(int remote, struct PStr *request, char *target_hostname, 
             printf("failed to forward request\n");
             return;
         }
-        
+
         set_basic_recv_sock(target);
         recver = &recv_PStr_basic;
     }
@@ -359,36 +349,29 @@ void handle_forwarding(int remote, struct PStr *request, char *target_hostname, 
     remove_header((struct Headers*)headers, "x-frame-options");
 
     struct PStr *redirect = get_header((struct Headers*)headers, "location");
-    if (redirect != NULL) {
-        // TODO: make this work for redirects to different domains
-        struct PStr *wOurHostname = PStr_replace_once(
-            redirect, target_hostname, strlen(target_hostname),
-            OURHOSTNAME, strlen(OURHOSTNAME)
+
+    if (redirect == NULL) {
+        struct PStr *new_headers = str_response_headers(headers);
+
+        struct PStr *response = build_PStr(
+            "%p"HEADERSEND"%p", new_headers, response_body
         );
-        move_PStr(PStr_remove_once(wOurHostname, "www.", 4, &send_www), redirect);
-        free_PStr(wOurHostname);
-    }
 
-    struct PStr *new_headers = str_response_headers(headers);
+        free_PStr(res1);
+        free_PStr(res2);
+        free_PStr(response_headers);
+        free_ResponseHeaders(headers);
+        free_PStr(response_body);
+        free_PStr(new_headers);
 
-    struct PStr *response = build_PStr(
-        "%p"HEADERSEND"%p", new_headers, response_body
-    );
+        close(target);
 
-    free_PStr(res1);
-    free_PStr(res2);
-    free_PStr(response_headers);
-    free_ResponseHeaders(headers);
-    free_PStr(response_body);
-    free_PStr(new_headers);
-
-    close(target);
-
-    int send_status = send_PStr(remote, response);
-    free_PStr(response);
-    if (send_status) {
-        printf("Failed to send response to client\n");
-        return;
+        if (send_PStr(remote, response)) {
+            printf("Failed to send response to client\n");
+        }
+        free_PStr(response);
+    } else {
+        serve_forward_redirect(remote, redirect);
     }
 }
 
@@ -425,7 +408,7 @@ void read_forwarding_request(int remote, struct RequestHeaders *headers, struct 
 void handle_request(void *remote_storage) {
     int remote = *(int*)remote_storage;
     free(remote_storage);
-    
+
     pthread_mutex_lock(&lock);
     char *target_hostname = locked_target_hostname;
     char *target_port = locked_target_port;
@@ -433,7 +416,7 @@ void handle_request(void *remote_storage) {
     bool send_www = locked_use_ssl;
     struct addrinfo *targetinfo = locked_targetinfo;
     pthread_mutex_unlock(&lock);
-    
+
     set_basic_recv_sock(remote);
     recv_PStr recver = &recv_PStr_basic;
 
@@ -495,7 +478,7 @@ void server_loop(int server) {
         socklen_t remote_addr_size = sizeof(remote_addr);
         int remote = accept(server, (struct sockaddr*)&remote_addr, &remote_addr_size);
 
-        int *remote_storage = malloc(sizeof(int));
+        int *remote_storage = malloc(sizeof(*remote_storage));
         *remote_storage = remote;
 
         int thread_idx = start_thread(&handle_request, remote_storage);
@@ -509,7 +492,7 @@ void server_loop(int server) {
 
 int main() {
     setup_SSL();
-    
+
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -536,7 +519,7 @@ int main() {
         printf("setsockopt error\n");
         exit(1);
     }
-    
+
     if (bind(server, serverinfo->ai_addr, serverinfo->ai_addrlen)) {
         printf("bind server error\n");
         exit(1);
@@ -553,6 +536,6 @@ int main() {
     freeaddrinfo(locked_targetinfo);
     freeaddrinfo(serverinfo);
     pthread_mutex_unlock(&lock);
-    
+
     return 0;
 }

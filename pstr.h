@@ -39,6 +39,8 @@ void print_PStr(struct PStr *str);
 
 void null_terminate_PStr(struct PStr *str);
 
+struct PStr *read_file(char *path);
+
 struct PStr *slice_PStr(struct PStr *source, int start, int len);
 
 struct PStrList *split_PStr(struct PStr *txt, char *splitter, int splitter_len);
@@ -64,6 +66,8 @@ void extend_PStr(struct PStr *str, const char *other, int other_len);
 struct PStr *join_PStrList(struct PStrList *list, char *sep, int sep_len);
 
 struct PStr *PStr_replace(struct PStr *str, char *from, int from_len, char *to, int to_len);
+
+void PStr_replace_inline(struct PStr *str, char *from, int from_len, char *to, int to_len);
 
 struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char *to, int to_len);
 
