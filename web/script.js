@@ -21,7 +21,10 @@ function setTitle(title) {
 }
 
 function setFavicon(href) {
-    document.getElementById("favicon").href = href;
+    if (href == null) href = "";
+    localStorage.setItem("favicon", href);
+    document.getElementById("favicon").href = 
+        href == "" ? "/forwarder/favicon.ico" : href;
     faviconLocationInput.value = href;
 }
 
@@ -117,7 +120,6 @@ function proccessLink(tab, a) {
     let href = a.getAttribute("href");
     if (href != null && URL.canParse(href)) {
         let hrefURL = new URL(href);
-        hrefURL.hostname = hrefURL.hostname.replace("www.", "");
         if (tab.origin == hrefURL.origin) {
             a.setAttribute("href", urlPath(hrefURL));
         } else {
@@ -262,20 +264,24 @@ onload = () => {
 
     faviconLocationInput.onchange = () => {
         let faviconHREF = faviconLocationInput.value;
-        if (!faviconHREF.endsWith(".ico")) {
-            if (!faviconHREF.endsWith("/")) faviconHREF += "/";
-            faviconHREF += "favicon.ico";
+        if (faviconHREF != "") {
+            if (faviconHREF.match(/^\w+$/))
+                faviconHREF += ".com";
+            if (!faviconHREF.endsWith(".ico")) {
+                if (!faviconHREF.endsWith("/")) 
+                    faviconHREF += "/";
+                faviconHREF += "favicon.ico";
+            }
+            if (!faviconHREF.startsWith("http")) 
+                faviconHREF = "https://" + faviconHREF;
         }
-        if (!faviconHREF.startsWith("http")) faviconHREF = "https://" + faviconHREF;
-        localStorage.setItem("favicon", faviconHREF);
         setFavicon(faviconHREF);
     };
 
     {
         let pageTitle = localStorage.getItem("title");
         if (pageTitle != null) setTitle(pageTitle);
-        
-        let faviconHREF = localStorage.getItem("favicon");
-        if (faviconHREF != null) setFavicon(faviconHREF);
+
+        setFavicon(localStorage.getItem("favicon"));
     }
 };
