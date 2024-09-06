@@ -264,10 +264,8 @@ struct Origin *parse_origin(struct PStr *text) {
         hostname = &pair2->first;
         port = CStr_from_PStr(&pair2->second);
     }
-    struct PStr *new_hostname = PStr_remove_once(hostname, "www.", 4, &origin->has_www);
     origin->port = port;
-    origin->hostname = CStr_from_PStr(new_hostname);
-    free_PStr(new_hostname);
+    origin->hostname = CStr_from_PStr(hostname);
     free_PStrPair(pair1);
     if (pair2 != NULL) free_PStrPair(pair2);
     return origin;

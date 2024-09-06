@@ -21,7 +21,6 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 char *locked_target_hostname;
 char *locked_target_port;
 bool locked_use_ssl;
-bool locked_send_www;
 struct addrinfo *locked_targetinfo = NULL;
 
 struct ThreadData {
@@ -235,14 +234,13 @@ bool set_target(struct Origin *origin) {
             break;
         }
     }
-    if (!isA) return true;
+    // if (!isA) return true;
 
     pthread_mutex_lock(&lock);
 
     locked_target_hostname = origin->hostname;
     locked_target_port = get_origin_port(origin);
     locked_use_ssl = uses_SSL(origin->protocol);
-    locked_send_www = origin->has_www;
 
     freeaddrinfo(locked_targetinfo);
 
@@ -264,7 +262,7 @@ bool set_target(struct Origin *origin) {
     return false;
 }
 
-void handle_forwarding(int remote, struct PStr *request, char *target_hostname, bool use_ssl, bool send_www, struct addrinfo *targetinfo) {
+void handle_forwarding(int remote, struct PStr *request, char *target_hostname, bool use_ssl, struct addrinfo *targetinfo) {
     int target = socket(targetinfo->ai_family, 
         targetinfo->ai_socktype, targetinfo->ai_protocol);
     if (target == -1) {
@@ -375,21 +373,15 @@ void handle_forwarding(int remote, struct PStr *request, char *target_hostname, 
     }
 }
 
-void read_forwarding_request(int remote, struct RequestHeaders *headers, struct PStr *request_body, char *target_hostname, char *target_port, bool use_ssl, bool send_www, struct addrinfo *targetinfo) {
+void read_forwarding_request(int remote, struct RequestHeaders *headers, struct PStr *request_body, char *target_hostname, char *target_port, bool use_ssl, struct addrinfo *targetinfo) {
     remove_header((struct Headers*)headers, "referer");
 
     set_header((struct Headers*)headers, "user-agent", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
 
     set_header((struct Headers*)headers, "accept-encoding", "identity");
 
-    char *host_template;
-    if (send_www) {
-        host_template = "www.%s:%s";
-    } else {
-        host_template = "%s:%s";
-    }
     struct PStr *target_host = build_PStr(
-        host_template, target_hostname, target_port
+        "%s:%s", target_hostname, target_port
     );
     set_header_PStr((struct Headers*)headers, "host", target_host);
 
@@ -400,7 +392,7 @@ void read_forwarding_request(int remote, struct RequestHeaders *headers, struct 
     );
     free_PStr(new_headers);
 
-    handle_forwarding(remote, forwardee, target_hostname, use_ssl, send_www, targetinfo);
+    handle_forwarding(remote, forwardee, target_hostname, use_ssl, targetinfo);
 
     free_PStr(forwardee);
 }
@@ -413,7 +405,6 @@ void handle_request(void *remote_storage) {
     char *target_hostname = locked_target_hostname;
     char *target_port = locked_target_port;
     bool use_ssl = locked_use_ssl;
-    bool send_www = locked_use_ssl;
     struct addrinfo *targetinfo = locked_targetinfo;
     pthread_mutex_unlock(&lock);
 
@@ -461,7 +452,7 @@ void handle_request(void *remote_storage) {
     } else if (targetinfo == NULL) {
         serve_redirect(remote, headers, 307, SPECIALURL VIEWURL);
     } else {
-        read_forwarding_request(remote, headers, request_body, target_hostname, target_port, use_ssl, send_www, targetinfo);
+        read_forwarding_request(remote, headers, request_body, target_hostname, target_port, use_ssl, targetinfo);
     }
 
     free_PStr(request_headers);

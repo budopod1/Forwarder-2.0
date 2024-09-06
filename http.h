@@ -70,7 +70,6 @@ enum Protocol_ {
 
 struct Origin {
     enum Protocol_ protocol;
-    bool has_www;
     char *hostname;
     char *port;
 };

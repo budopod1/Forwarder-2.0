@@ -4,12 +4,12 @@
 #define SERVERNAME "Forwarder 2.0"
 
 /*
-Almost native experience:
+near-native experience:
 * en.wikipedia.org
 * github.com
 * opencv.org
 * google.com
-* www.desmos.com
+* desmos.com
 * commons.wikimedia.org
 * nytimes.org
 Incomplete functionality:
