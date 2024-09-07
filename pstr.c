@@ -11,7 +11,7 @@ struct PStr *new_PStr() {
 }
 
 struct PStr *PStr_from_CStr(char *cstr) {
-    struct PStr *str = malloc(sizeof(struct PStr));
+    struct PStr *str = malloc(sizeof(*str));
     str->length = strlen(cstr);
     str->capacity = -1;
     str->text = cstr;
@@ -109,7 +109,7 @@ struct PStr *slice_PStr(struct PStr *source, int start, int len) {
 }
 
 struct PStrList *split_PStr(struct PStr *txt, char *splitter, int splitter_len) {
-    struct PStrList *list = malloc(sizeof(struct PStrList));
+    struct PStrList *list = malloc(sizeof(*list));
     int count = 0;
     int capacity = 0;
     list->items = NULL;
@@ -142,7 +142,7 @@ struct PStrList *split_PStr(struct PStr *txt, char *splitter, int splitter_len) 
 }
 
 struct PStrList *split_trim_PStr(struct PStr *txt, char *splitter, int splitter_len, char *trimee, int trimee_len) {
-    struct PStrList *list = malloc(sizeof(struct PStrList));
+    struct PStrList *list = malloc(sizeof(*list));
     int count = 0;
     list->items = NULL;
     int secstart = 0;
@@ -178,7 +178,7 @@ struct PStrPair *partition_PStr(struct PStr *txt, char *splitter, int splitter_l
     for (int i = 0; i <= txt->length - splitter_len; i++) {
         if (memcmp(txt->text + i, splitter, splitter_len) == 0) {
             if (txt->capacity != -1) txt->capacity = -2;
-            struct PStrPair *pair = malloc(sizeof(struct PStrPair));
+            struct PStrPair *pair = malloc(sizeof(*pair));
             struct PStr *first = &pair->first;
             first->capacity = -1;
             first->length = i;
@@ -196,7 +196,7 @@ struct PStrPair *partition_PStr(struct PStr *txt, char *splitter, int splitter_l
 struct PStrPair *partition_trim_PStr(struct PStr *txt, char *splitter, int splitter_len, char *trimee, int trimee_len) {
     for (int i = 0; i <= txt->length - splitter_len; i++) {
         if (memcmp(txt->text + i, splitter, splitter_len) == 0) {
-            struct PStrPair *pair = malloc(sizeof(struct PStrPair));
+            struct PStrPair *pair = malloc(sizeof(*pair));
             struct PStr *first = &pair->first;
             first->capacity = -1;
             first->length = i;
@@ -217,7 +217,7 @@ struct PStrPair *partition_trim_PStr(struct PStr *txt, char *splitter, int split
 }
 
 struct PStr *clone_PStr(struct PStr *old) {
-    struct PStr *result = malloc(sizeof(struct PStr));
+    struct PStr *result = malloc(sizeof(*result));
     result->capacity = old->length;
     result->length = old->length;
     result->text = malloc(old->length);
@@ -270,7 +270,7 @@ struct PStr *join_PStrList(struct PStrList *list, char *sep, int sep_len) {
     for (int i = 0; i < list->count; i++) {
         length += (list->items + i)->length;
     }
-    struct PStr *str = malloc(sizeof(struct PStr));
+    struct PStr *str = malloc(sizeof(*str));
     str->capacity = length;
     str->length = length;
     str->text = malloc(length);
@@ -309,7 +309,7 @@ void PStr_replace_inline(struct PStr *str, char *from, int from_len, char *to, i
 }
 
 struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char *to, int to_len) {
-    struct PStr *result = malloc(sizeof(struct PStr));
+    struct PStr *result = malloc(sizeof(*result));
     for (int i = 0; i <= str->length - from_len; i++) {
         if (memcmp(str->text + i, from, from_len) == 0) {
             int new_len = str->length - from_len + to_len;
@@ -332,7 +332,7 @@ struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len, 
     for (int i = 0; i <= str->length - removee_len; i++) {
         if (memcmp(str->text + i, removee, removee_len) == 0) {
             int new_len = str->length - removee_len;
-            struct PStr *result = malloc(sizeof(struct PStr));
+            struct PStr *result = malloc(sizeof(*result));
             result->length = new_len;
             result->capacity = new_len;
             result->text = malloc(new_len);
@@ -362,7 +362,7 @@ void PStr_lower_to_dest(struct PStr *str, struct PStr *dest) {
 }
 
 struct PStr *PStr_to_lower(struct PStr *str) {
-    struct PStr *result = malloc(sizeof(struct PStr));
+    struct PStr *result = malloc(sizeof(*result));
     PStr_lower_to_dest(str, result);
     return result;
 }
@@ -466,7 +466,7 @@ struct PStr *PStr_from_int_len(int i, int digits) {
         printf("Not enough digits (only %d) allocated for stringification of %d\n", digits, i);
         exit(1);
     }
-    struct PStr *result = malloc(sizeof(struct PStr));
+    struct PStr *result = malloc(sizeof(*result));
     result->capacity = digits + 1;
     result->length = digits;
     result->text = malloc(digits + 1);

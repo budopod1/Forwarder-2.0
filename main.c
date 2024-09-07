@@ -297,16 +297,16 @@ void handle_forwarding(int remote, struct PStr *request, struct TargetInfo *targ
     struct addrinfo *targetaddr = target_info->targetaddr;
     struct Origin *target_origin = target_info->target_origin;
     
-    int target = socket(targetaddr->ai_family, 
-    targetaddr->ai_socktype, targetaddr->ai_protocol);
+    int target = socket(targetaddr->ai_family, targetaddr->ai_socktype, targetaddr->ai_protocol);
     if (target == -1) {
-        printf("target = socket() error\n");
-        exit(1);
+        printf("socket() error\n");
+        return;
     }
 
     if (connect(target, targetaddr->ai_addr, targetaddr->ai_addrlen)) {
         printf("connect to target error\n");
-        exit(1);
+        close(target);
+        return;
     }
 
     SSL *ssl = NULL;
@@ -315,11 +315,11 @@ void handle_forwarding(int remote, struct PStr *request, struct TargetInfo *targ
     if (uses_SSL(target_origin->protocol)) {
         ssl = upgrade_to_SSL(target_origin->hostname, target);
 
-        if (ssl == NULL) return;
+        if (ssl == NULL) goto cleanup_socket;
 
         if (send_PStr_SSL(ssl, request)) {
             printf("failed to forward request through SSL\n");
-            return;
+            goto cleanup_socket;
         }
 
         set_SSL_recv(ssl);
@@ -327,7 +327,7 @@ void handle_forwarding(int remote, struct PStr *request, struct TargetInfo *targ
     } else {
         if (send_PStr(target, request)) {
             printf("failed to forward request\n");
-            return;
+            goto cleanup_socket;
         }
 
         set_basic_recv_sock(target);
@@ -336,40 +336,21 @@ void handle_forwarding(int remote, struct PStr *request, struct TargetInfo *targ
 
     struct PStr *res1 = new_PStr();
     struct PStr *response_headers = recv_headers(res1, recver);
-    if (response_headers == NULL) {
-        close(target);
-        free_PStr(res1);
-        return;
-    }
+    if (response_headers == NULL) goto cleanup_res1;
 
     struct ResponseHeaders *headers = (struct ResponseHeaders*)parse_headers(RESPONSE, response_headers);
-    if (headers == NULL) {
-        close(target);
-        free_PStr(res1);
-        free_PStr(response_headers);
-        return;
-    }
+    if (headers == NULL) goto cleanup_str_headers;
 
     if (headers->http_version > HTTP11) {
-        close(target);
-        free_PStr(res1);
-        free_PStr(response_headers);
-        free_ResponseHeaders(headers);
         printf("Only http version 1.1 is supported for responses\n");
-        return;
+        goto cleanup_headers;
     }
 
     struct PStr *res2 = clone_PStr(res1);
 
     struct PStr *response_body;
-    if (recv_body(res2, response_headers, (struct Headers*)headers, recver, &response_body)) {
-        close(target);
-        free_PStr(res1);
-        free_PStr(res2);
-        free_PStr(response_headers);
-        free_ResponseHeaders(headers);
-        return;
-    }
+    if (recv_body(res2, response_headers, (struct Headers*)headers, recver, &response_body))
+        goto cleanup_res2;
 
     set_header((struct Headers*)headers, "cache-control", "no-store");
     remove_header((struct Headers*)headers, "expires");
@@ -397,11 +378,17 @@ void handle_forwarding(int remote, struct PStr *request, struct TargetInfo *targ
         serve_forward_redirect(remote, redirect);
     }
 
-    free_PStr(res1);
-    free_PStr(res2);
-    free_PStr(response_headers);
-    free_ResponseHeaders(headers);
+// cleanup_body:
     free_PStr(response_body);
+cleanup_res2:
+    free_PStr(res2);
+cleanup_headers:
+    free_ResponseHeaders(headers);
+cleanup_str_headers:
+    free_PStr(response_headers);
+cleanup_res1:
+    free_PStr(res1);
+cleanup_socket:
     if (ssl != NULL) close_SSL(ssl);
     close(target);
 }

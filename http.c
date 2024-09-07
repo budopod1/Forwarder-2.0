@@ -83,7 +83,7 @@ char *str_http_version(enum HTTPVersion version) {
 }
 
 struct PStr *str_header_list(const struct Headers *headers) {
-    struct PStrList *lines = malloc(sizeof(struct PStrList));
+    struct PStrList *lines = malloc(sizeof(*lines));
     int header_count = headers->count;
     lines->count = header_count;
     lines->items = malloc(sizeof(struct PStr) * header_count);
@@ -251,7 +251,7 @@ struct Headers *parse_headers(bool isRequest, struct PStr *txt) {
 }
 
 struct Origin *parse_origin(struct PStr *text) {
-    struct Origin *origin = malloc(sizeof(struct Origin));
+    struct Origin *origin = malloc(sizeof(*origin));
     struct PStrPair *pair1 = partition_PStr(text, "://", 3);
     if (pair1 == NULL) return NULL;
     origin->protocol = parse_protocol(&pair1->first);
@@ -308,7 +308,7 @@ void set_header(struct Headers *headers, char *key, char *value) {
     struct PStr *old_val = get_header(headers, key);
     if (old_val == NULL) {
         headers->headers = realloc(headers->headers, ++headers->count*sizeof(struct Header*));
-        struct Header *header = malloc(sizeof(struct Header));
+        struct Header *header = malloc(sizeof(*header));
         CStr_copy_to_PStr(key, &header->key);
         CStr_copy_to_PStr(value, &header->value);
         headers->headers[headers->count-1] = header;
@@ -321,7 +321,7 @@ void set_header_PStr(struct Headers *headers, char *key, struct PStr *value) {
     struct PStr *old_val = get_header(headers, key);
     if (old_val == NULL) {
         headers->headers = realloc(headers->headers, ++headers->count*sizeof(struct Header*));
-        struct Header *header = malloc(sizeof(struct Header));
+        struct Header *header = malloc(sizeof(*header));
         CStr_copy_to_PStr(key, &header->key);
         move_PStr(value, &header->value);
         headers->headers[headers->count-1] = header;
@@ -332,7 +332,7 @@ void set_header_PStr(struct Headers *headers, char *key, struct PStr *value) {
 
 void add_header(struct Headers *headers, char *key, struct PStr *value) {
     headers->headers = realloc(headers->headers, ++headers->count*sizeof(struct Header*));
-    struct Header *header = malloc(sizeof(struct Header));
+    struct Header *header = malloc(sizeof(*header));
     CStr_copy_to_PStr(key, &header->key);
     copy_to_PStr(value, &header->value);
     headers->headers[headers->count-1] = header;
@@ -346,7 +346,7 @@ void add_headers(struct Headers *headers, int count, char *keys[], char *values[
     headers->headers = malloc(sizeof(struct Header*) * count);
     headers->count = count;
     for (int i = 0; i < count; i++) {
-        struct Header *header = malloc(sizeof(struct Header));
+        struct Header *header = malloc(sizeof(*header));
         CStr_copy_to_PStr(keys[i], &header->key);
         CStr_copy_to_PStr(values[i], &header->value);
         headers->headers[i] = header;
