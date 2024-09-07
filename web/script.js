@@ -106,32 +106,53 @@ async function specialURLRedirect(tab) {
     if (tab.origin.includes("youtube.com")
         && tab.url.startsWith("/watch")) {
         let params = new URLSearchParams(location.search);
-        await navigateToPage(tab, `https://www.youtube-nocookie.com/embed/${params.get("v")}`);
+        await navigateToURL(tab, new URL(`https://www.youtube-nocookie.com/embed/${params.get("v")}`));
         return true;
     }
     return false;
 }
 
-function proccessLink(tab, a) {
+function processElement(tab, elem, attr, onNewOrigin) {
+    let href = elem.getAttribute(attr);
+    if (href != null && href != "") {
+        if (href.startsWith("//")) href = "https:" + href;
+        if (URL.canParse(href)) {
+            let url = new URL(href);
+            if (tab.origin == url.origin) {
+                elem.setAttribute(attr, urlPath(url));
+            } else {
+                onNewOrigin(url);
+            }
+        }
+    }
+}
+
+function processForm(tab, form) {
+    processElement(tab, form, "action", (url) => {
+        form.setAttribute("action", urlPath(url));
+        form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            (async () => {
+                await setOrigin(url.origin);
+                form.submit();
+            })();
+        });
+    });
+}
+
+function processLink(tab, a) {
     let target = a.getAttribute("target");
     if (target != "_blank") {
         a.removeAttribute("target");
     }
-    let href = a.getAttribute("href");
-    if (href != null) {
-        if (href.startsWith("//")) href = "https:" + href;
-        if (URL.canParse(href)) {
-            let hrefURL = new URL(href);
-            if (tab.origin == hrefURL.origin) {
-                a.setAttribute("href", urlPath(hrefURL));
-            } else {
-                a.setAttribute("href", "#");
-                a.addEventListener("click", () => 
-                    navigateToPage(tab, hrefURL.toString())
-                );
-            }
-        }
-    }
+    
+    processElement(tab, a, "href", (url) => {
+        a.setAttribute("href", "#");
+        a.addEventListener("click", () => 
+            navigateToURL(tab, url)
+        );
+    });
+    
     if (a.id == "forwarder-2-redirect") {
         a.click();
     }
@@ -149,7 +170,12 @@ async function iframeHandler(tab, iframe) {
 
     let as = idocument.getElementsByTagName("a");
     for (let a of as) {
-        proccessLink(tab, a);
+        processLink(tab, a);
+    }
+
+    let forms = idocument.getElementsByTagName("form");
+    for (let form of forms) {
+        processForm(tab, form);
     }
 
     await displayTabURL(tab, ilocation);
@@ -206,7 +232,14 @@ async function addNewTab() {
     mainElem.appendChild(section);
 }
 
-async function navigateToPage(tab, urlTxt) {
+async function navigateToURL(tab, url) {
+    tab.origin = url.origin;
+    if (await setTabURL(tab, url)) {
+        tab.iframe.src = tab.url;
+    }
+}
+
+async function navigateGivenInput(tab, urlTxt) {
     let slashIndex = urlTxt.indexOf("://");
     if (slashIndex == -1) {
         urlTxt = "https://" + urlTxt;
@@ -216,10 +249,7 @@ async function navigateToPage(tab, urlTxt) {
     if (dotIndex == -1) {
         url.hostname += ".com";
     }
-    tab.origin = url.origin;
-    if (await setTabURL(tab, url)) {
-        tab.iframe.src = tab.url;
-    }
+    await navigateToURL(tab, url);
 }
 
 onload = () => {
@@ -248,7 +278,7 @@ onload = () => {
 
     document.getElementById("url-bar-holder").onsubmit = (e) => {
         e.preventDefault();
-        navigateToPage(currentTab, urlBarInput.value);
+        navigateGivenInput(currentTab, urlBarInput.value);
     };
 
     document.getElementById("settings-btn").onclick = () => {
