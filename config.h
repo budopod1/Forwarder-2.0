@@ -40,6 +40,7 @@ Does not work:
 #define BACKLOG 10
 #define MAX_RECV 4096
 #define MAX_THREAD_COUNT 10
+#define MAX_THREAD_WAIT 60
 
 #define REQUEST true
 #define RESPONSE false

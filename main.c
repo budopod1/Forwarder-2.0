@@ -12,10 +12,12 @@
 #include <time.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <signal.h>
 #include "config.h"
 #include "http.h"
 #include "pstr.h"
 #include "tls.h"
+#include "tasks.h"
 
 struct TargetInfo {
     atomic_int rc;
@@ -25,14 +27,6 @@ struct TargetInfo {
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 struct TargetInfo *locked_target_info = NULL;
-
-struct ThreadData {
-    void *payload;
-    void (*func)(void *data);
-    atomic_bool is_running;
-};
-
-struct ThreadData threads_data[MAX_THREAD_COUNT];
 
 bool set_target(struct Origin *origin);
 
@@ -47,46 +41,6 @@ void decr_TargetInfo_rc(struct TargetInfo *info) {
 
 void incr_TargetInfo_rc(struct TargetInfo *info) {
     if (info != NULL) info->rc++;
-}
-
-int get_free_thread_idx() {
-    for (int i = 0; i < MAX_THREAD_COUNT; i++) {
-        if (!threads_data[i].is_running) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-void thread_cleanup(void *data_ptr) {
-    ((struct ThreadData*)data_ptr)->is_running = false;
-}
-
-void *thread_entry(void *data_ptr) {
-    pthread_cleanup_push(&thread_cleanup, data_ptr);
-    struct ThreadData *data = (struct ThreadData*)data_ptr;
-    (*data->func)(data->payload);
-    pthread_cleanup_pop(1);
-    return NULL;
-}
-
-int start_thread(void (*func)(void *payload), void *payload) {
-    int idx = get_free_thread_idx();
-    if (idx == -1) return -1;
-    struct ThreadData *thread_data = &threads_data[idx];
-    thread_data->payload = payload;
-    thread_data->func = func;
-    thread_data->is_running = true;
-    pthread_t thread;
-    pthread_attr_t thread_attr;
-    pthread_attr_init(&thread_attr);
-    pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED);
-    int creation_status = pthread_create(&thread, &thread_attr, &thread_entry, thread_data);
-    pthread_attr_destroy(&thread_attr);
-    if (creation_status) {
-        return -1;
-    }
-    return idx;
 }
 
 struct ResponseHeaders *make_empty_ResponseHeaders(int status) {
@@ -485,8 +439,7 @@ void server_loop(int server) {
         int *remote_storage = malloc(sizeof(*remote_storage));
         *remote_storage = remote;
 
-        int thread_idx = start_thread(&handle_request, remote_storage);
-        if (thread_idx == -1) {
+        if (!start_task(&handle_request, remote_storage)) {
             // We can't create a thread for some reason, do this operation
             // on the main thread instead
             handle_request(remote_storage);
@@ -496,6 +449,8 @@ void server_loop(int server) {
 
 int main() {
     setup_SSL();
+
+    signal(SIGPIPE, SIG_IGN);
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
