@@ -434,15 +434,17 @@ void printf_PStr(const char *fmt, ...) {
     free_PStr(str);
 }
 
-int CStr_parse_int(char *txt, int base, int *result) {
+bool CStr_parse_int(char *txt, int base, int *result) {
     char *endptr;
     *result = (int)strtol(txt, &endptr, base);
     return txt + strlen(txt) != endptr;
 }
 
-int PStr_parse_int(struct PStr *str, int base, int *result) {
+bool PStr_parse_int(struct PStr *str, int base, int *result) {
     char *cstr = CStr_from_PStr(str);
-    return CStr_parse_int(cstr, base, result);
+    bool status = CStr_parse_int(cstr, base, result);
+    free(cstr);
+    return status;
 }
 
 int int_pow(int base, int exponent) {

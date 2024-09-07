@@ -144,6 +144,7 @@ enum TransferEncoding parse_transfer_encoding(struct PStr *str) {
     for (int i = 0; i < parts->count; i++) {
         result |= parse_enum_flag(&parts->items[i], TRANSFERENCODINGSTXT, UNKNOWNTRANSFERENCODING);
     }
+    free_PStrList(parts);
     if (result == 0) return UNKNOWNTRANSFERENCODING;
     return result;
 }
@@ -432,6 +433,7 @@ int recv_body_chunked(struct PStr *req, struct PStr *headersTxt, recv_PStr recve
 int recv_body_identity(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
     struct PStr *contentLengthTxt = get_header(headers, "content-length");
     if (contentLengthTxt == NULL) {
+        *request_body = new_PStr();
         return 0;
     }
 
@@ -451,8 +453,6 @@ int recv_body_identity(struct PStr *req, struct PStr *headersTxt, struct Headers
 }
 
 int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
-    *request_body = new_PStr();
-    
     enum TransferEncoding encoding = identity_TRANSFERENCODING;
     struct PStr *transferEncodingTxt = get_header(headers, "transfer-encoding");
     if (transferEncodingTxt != NULL) {

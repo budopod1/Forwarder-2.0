@@ -118,15 +118,18 @@ function proccessLink(tab, a) {
         a.removeAttribute("target");
     }
     let href = a.getAttribute("href");
-    if (href != null && URL.canParse(href)) {
-        let hrefURL = new URL(href);
-        if (tab.origin == hrefURL.origin) {
-            a.setAttribute("href", urlPath(hrefURL));
-        } else {
-            a.setAttribute("href", "#");
-            a.addEventListener("click", () => 
-                navigateToPage(tab, hrefURL.toString())
-            );
+    if (href != null) {
+        if (href.startsWith("//")) href = "https:" + href;
+        if (URL.canParse(href)) {
+            let hrefURL = new URL(href);
+            if (tab.origin == hrefURL.origin) {
+                a.setAttribute("href", urlPath(hrefURL));
+            } else {
+                a.setAttribute("href", "#");
+                a.addEventListener("click", () => 
+                    navigateToPage(tab, hrefURL.toString())
+                );
+            }
         }
     }
     if (a.id == "forwarder-2-redirect") {

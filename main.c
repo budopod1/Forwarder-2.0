@@ -114,7 +114,7 @@ struct PStr *render_template(char *path, int pairCount, char *keys[], struct PSt
         char *key = keys[i];
         int key_len = strlen(key);
         int from_len = key_len + 2;
-        char *from = malloc(from_len);
+        char from[from_len];
         from[0] = '{';
         memcpy(from + 1, key, key_len);
         from[from_len - 1] = '}';

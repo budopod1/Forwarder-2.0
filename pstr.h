@@ -85,9 +85,9 @@ struct PStr *build_PStr(const char *fmt, ...);
 
 void printf_PStr(const char *fmt, ...);
 
-int CStr_parse_int(char *txt, int base, int *result);
+bool CStr_parse_int(char *txt, int base, int *result);
 
-int PStr_parse_int(struct PStr *str, int base, int *result);
+bool PStr_parse_int(struct PStr *str, int base, int *result);
 
 struct PStr *PStr_from_int_len(int i, int digits);
 

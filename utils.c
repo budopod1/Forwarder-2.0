@@ -29,11 +29,11 @@ int parse_enum_flag(struct PStr *str, char *options[], int max) {
     return max;
 }
 
-int parse_int(char *str, int strlen, int base, int *result) {
+bool parse_int(char *str, int strlen, int base, int *result) {
     char *newstr = malloc(strlen + 1);
     memcpy(newstr, str, strlen);
     newstr[strlen] = '\0';
-    int status = CStr_parse_int(newstr, base, result);
+    bool status = CStr_parse_int(newstr, base, result);
     free(newstr);
     return status;
 }
