@@ -98,9 +98,11 @@ int uses_SSL(enum Protocol_ protocol);
 
 char *get_origin_port(struct Origin *origin);
 
-struct Headers *parse_headers(int isRequest, struct PStr *txt);
+struct Headers *parse_headers(bool isRequest, struct PStr *txt);
 
 struct Origin *parse_origin(struct PStr *text);
+
+void free_Origin(struct Origin *origin);
 
 void remove_header(struct Headers *headers, char *removee);
 

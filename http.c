@@ -15,10 +15,14 @@ char *CONTENTTYPETXT[] = {"text/plain; charset=utf-8", "text/html; charset=utf-8
 char *PROTOCOLTXT[] = {"http", "https"};
 char *DEFAULTPROTOCOLPORTS[] = {"80", "443", NULL};
 
+void free_Header(struct Header *header) {
+    free_PStrPair((struct PStrPair*)header);
+}
+
 void free_RequestHeaders(struct RequestHeaders *headers) {
     free_PStr(headers->url);
     for (int i = 0; i < headers->count; i++) {
-        free_PStrPair((struct PStrPair*)headers->headers[i]);
+        free_Header(headers->headers[i]);
     }
     free(headers->headers);
     free(headers);
@@ -27,7 +31,7 @@ void free_RequestHeaders(struct RequestHeaders *headers) {
 void free_ResponseHeaders(struct ResponseHeaders *headers) {
     free_PStr(headers->status);
     for (int i = 0; i < headers->count; i++) {
-        free_PStrPair((struct PStrPair*)headers->headers[i]);
+        free_Header(headers->headers[i]);
     }
     free(headers->headers);
     free(headers);
@@ -85,10 +89,7 @@ struct PStr *str_header_list(const struct Headers *headers) {
     lines->items = malloc(sizeof(struct PStr) * header_count);
     for (int i = 0; i < header_count; i++) {
         struct Header *header = headers->headers[i];
-        struct PStr *built = build_PStr("%p: %p", &header->key, &header->value);
-        struct PStr *target_loc = lines->items+i;
-        memcpy(target_loc, built, sizeof(struct PStr));
-        free(built);
+        move_PStr(build_PStr("%p: %p", &header->key, &header->value), lines->items + i);
     }
     struct PStr *result = join_PStrList(lines, HTTPNEWLINE, HTTPNEWLINESIZE);
     free_PStrList(lines);
@@ -203,13 +204,12 @@ struct Header *parse_header(struct PStr *txt) {
         printf_PStr("Invalid http header: %p\n", txt);
         return NULL;
     }
-    struct PStr *key = &pair->first;
-    memcpy(&pair->first, PStr_to_lower(key), sizeof(struct PStr));
+    PStr_lower_to_dest(&pair->first, &pair->first);
     // the old key's capacity will alway's be -1, so it doesn't need to be freed
     return (struct Header*)pair;
 }
 
-struct Headers *parse_headers(int isRequest, struct PStr *txt) {
+struct Headers *parse_headers(bool isRequest, struct PStr *txt) {
     struct Headers *headers = malloc(isRequest ? sizeof(struct RequestHeaders) : sizeof(struct ResponseHeaders));
     int headerCount = 0;
     struct Header **header_list = NULL;
@@ -232,6 +232,10 @@ struct Headers *parse_headers(int isRequest, struct PStr *txt) {
         }
         struct Header *header = parse_header(header_txt);
         if (header == NULL) {
+            for (int j = 0; j < headerCount; j++) {
+                free_Header(header_list[i]);
+            }
+            free(header_list);
             free_PStrList(list);
             return NULL;
         }
@@ -271,11 +275,17 @@ struct Origin *parse_origin(struct PStr *text) {
     return origin;
 }
 
+void free_Origin(struct Origin *origin) {
+    free(origin->hostname);
+    free(origin->port);
+    free(origin);
+}
+
 void remove_header(struct Headers *headers, char *removee) {
     for (int i = 0; i < headers->count; i++) {
         struct Header *header = headers->headers[i];
         if (CStr_equals_PStr(removee, &header->key)) {
-            free_PStrPair((struct PStrPair*)header);
+            free_Header(header);
             int size = (--headers->count-i)*sizeof(struct Header*);
             memcpy(headers->headers+i, headers->headers+i+1, size);
             i--;
@@ -312,10 +322,10 @@ void set_header_PStr(struct Headers *headers, char *key, struct PStr *value) {
         headers->headers = realloc(headers->headers, ++headers->count*sizeof(struct Header*));
         struct Header *header = malloc(sizeof(struct Header));
         CStr_copy_to_PStr(key, &header->key);
-        copy_to_PStr(value, &header->value);
+        move_PStr(value, &header->value);
         headers->headers[headers->count-1] = header;
     } else {
-        copy_to_PStr(value, old_val);
+        move_PStr(value, old_val);
     }
 }
 

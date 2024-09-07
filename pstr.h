@@ -73,6 +73,8 @@ struct PStr *PStr_replace_once(struct PStr *str, char *from, int from_len, char 
 
 struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len, bool *did_remove);
 
+void PStr_lower_to_dest(struct PStr *str, struct PStr *dest);
+
 struct PStr *PStr_to_lower(struct PStr *str);
 
 int PStr_starts_with(struct PStr *str, char *sub, int sublen);

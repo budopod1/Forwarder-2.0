@@ -17,21 +17,37 @@
 #include "pstr.h"
 #include "tls.h"
 
+struct TargetInfo {
+    atomic_int rc;
+    struct Origin *target_origin;
+    struct addrinfo *targetaddr;
+};
+
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-char *locked_target_hostname;
-char *locked_target_port;
-bool locked_use_ssl;
-struct addrinfo *locked_targetinfo = NULL;
+struct TargetInfo *locked_target_info = NULL;
 
 struct ThreadData {
-    pthread_t id;
     void *payload;
     void (*func)(void *data);
     atomic_bool is_running;
 };
+
 struct ThreadData threads_data[MAX_THREAD_COUNT];
 
 bool set_target(struct Origin *origin);
+
+void decr_TargetInfo_rc(struct TargetInfo *info) {
+    if (info == NULL) return;
+    if (--info->rc <= 0) {
+        free_Origin(info->target_origin);
+        freeaddrinfo(info->targetaddr);
+        free(info);
+    }
+}
+
+void incr_TargetInfo_rc(struct TargetInfo *info) {
+    if (info != NULL) info->rc++;
+}
 
 int get_free_thread_idx() {
     for (int i = 0; i < MAX_THREAD_COUNT; i++) {
@@ -61,18 +77,28 @@ int start_thread(void (*func)(void *payload), void *payload) {
     thread_data->payload = payload;
     thread_data->func = func;
     thread_data->is_running = true;
-    if (pthread_create(&thread_data->id, NULL, &thread_entry, thread_data)) {
+    pthread_t thread;
+    pthread_attr_t thread_attr;
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED);
+    int creation_status = pthread_create(&thread, &thread_attr, &thread_entry, thread_data);
+    pthread_attr_destroy(&thread_attr);
+    if (creation_status) {
         return -1;
     }
     return idx;
 }
 
-void make_empty_ResponseHeaders(struct ResponseHeaders *responseHeaders, int status) {
-    responseHeaders->http_version = HTTP11;
-    responseHeaders->status = PStr_from_int_len(status, 3);
+struct ResponseHeaders *make_empty_ResponseHeaders(int status) {
+    struct ResponseHeaders *headers = malloc(sizeof(*headers));
+    
+    headers->http_version = HTTP11;
+    headers->status = PStr_from_int_len(status, 3);
 
-    responseHeaders->count = 0;
-    responseHeaders->headers = NULL;
+    headers->count = 0;
+    headers->headers = NULL;
+
+    return headers;
 }
 
 void make_HTTP_date(char buffer[64]) {
@@ -98,26 +124,25 @@ struct PStr *render_template(char *path, int pairCount, char *keys[], struct PSt
     return result;
 }
 
-int send_special_response(int remote, struct PStr *response) {
+bool send_special_response(int remote, struct PStr *response) {
     int send_status = send_PStr(remote, response);
     free_PStr(response);
     if (send_status) {
         printf("Failed to send special response\n");
-        return 1;
+        return true;
     }
 
-    return 0;
+    return false;
 }
 
 bool serve_content(int remote, int status, char *content, int contentLength, enum ContentType contentType) {
-    struct ResponseHeaders responseHeaders;
-    make_empty_ResponseHeaders(&responseHeaders, status);
+    struct ResponseHeaders *responseHeaders = make_empty_ResponseHeaders(status);
 
     char date[64];
     make_HTTP_date(date);
 
     char *contentLengthStr = CStr_from_int(contentLength);
-    add_headers((struct Headers*)&responseHeaders, 4, (char*[]) {
+    add_headers((struct Headers*)responseHeaders, 4, (char*[]) {
         "connection",
         "content-type",
         "date",
@@ -134,10 +159,11 @@ bool serve_content(int remote, int status, char *content, int contentLength, enu
 
     struct PStr contentPStr = {-1, contentLength, content};
 
-    struct PStr *responseHeadersTxt = str_response_headers(&responseHeaders);
+    struct PStr *responseHeadersTxt = str_response_headers(responseHeaders);
     struct PStr *response = build_PStr("%p"HEADERSEND"%p", responseHeadersTxt, &contentPStr);
 
     free_PStr(responseHeadersTxt);
+    free_ResponseHeaders(responseHeaders);
 
     return send_special_response(remote, response);
 }
@@ -153,13 +179,12 @@ bool serve_file(int remote, struct RequestHeaders *request, int status, char *pa
 }
 
 bool serve_redirect(int remote, struct RequestHeaders *headers, int status, char *url) {
-    struct ResponseHeaders responseHeaders;
-    make_empty_ResponseHeaders(&responseHeaders, status);
+    struct ResponseHeaders *responseHeaders = make_empty_ResponseHeaders(status);
 
     char date[64];
     make_HTTP_date(date);
 
-    add_headers((struct Headers*)&responseHeaders, 4, (char*[]) {
+    add_headers((struct Headers*)responseHeaders, 4, (char*[]) {
         "connection",
         "date",
         "server",
@@ -171,10 +196,11 @@ bool serve_redirect(int remote, struct RequestHeaders *headers, int status, char
         url
     });
 
-    struct PStr *responseHeadersTxt = str_response_headers(&responseHeaders);
+    struct PStr *responseHeadersTxt = str_response_headers(responseHeaders);
     struct PStr *response = build_PStr("%p"HEADERSEND, responseHeadersTxt);
 
     free_PStr(responseHeadersTxt);
+    free_ResponseHeaders(responseHeaders);
 
     return send_special_response(remote, response);
 }
@@ -194,7 +220,7 @@ bool serve_forward_redirect(int remote, struct PStr *target) {
     return success;
 }
 
-int serve_request(int remote, struct RequestHeaders *headers, struct PStr *body) {
+bool serve_request(int remote, struct RequestHeaders *headers, struct PStr *body) {
     if (CStr_equals_PStr(SPECIALURL VIEWURL, headers->url)) {
         return serve_file(remote, headers, 200, "web/view.html", TEXTHTML_CONTENTTYPE);
     } else if (CStr_equals_PStr(SPECIALURL NEWTABURL, headers->url)) {
@@ -205,10 +231,10 @@ int serve_request(int remote, struct RequestHeaders *headers, struct PStr *body)
         return serve_file(remote, headers, 200, "web/script.js", TEXTJS_CONTENTTYPE);
     } else if (CStr_equals_PStr(SPECIALURL CHANGEORIGINURL, headers->url)) {
         struct Origin *origin = parse_origin(body);
-        if (origin == NULL) return 1;
-        bool set_target_status = set_target(origin);
-        free(origin);
-        if (set_target_status) {
+        if (origin == NULL) {
+            return serve_empty(remote, 403);
+        }
+        if (set_target(origin)) {
             return serve_empty(remote, 403);
         } else {
             return serve_empty(remote, 200);
@@ -220,11 +246,14 @@ int serve_request(int remote, struct RequestHeaders *headers, struct PStr *body)
     }
 }
 
+/*
 unsigned int AHH[] = {
     6174, 11777, 7115, 11498, 6248, 6415, 6317, 18272, 8072, 11884, 6252, 8465, 7957
 };
+*/
 
 bool set_target(struct Origin *origin) {
+    /*
     unsigned int HH = dumb_hash(origin->hostname, strlen(origin->hostname));
     bool isA = false;
     unsigned long AHHCount = sizeof(AHH) / sizeof(AHH[0]);
@@ -234,15 +263,12 @@ bool set_target(struct Origin *origin) {
             break;
         }
     }
-    // if (!isA) return true;
-
-    pthread_mutex_lock(&lock);
-
-    locked_target_hostname = origin->hostname;
-    locked_target_port = get_origin_port(origin);
-    locked_use_ssl = uses_SSL(origin->protocol);
-
-    freeaddrinfo(locked_targetinfo);
+    if (!isA) return true;
+    */
+    
+    struct TargetInfo *target_info = malloc(sizeof(*target_info));
+    target_info->rc = 1;
+    target_info->target_origin = origin;
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -250,36 +276,44 @@ bool set_target(struct Origin *origin) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
 
-    int getaddrinfo_status = getaddrinfo(locked_target_hostname, locked_target_port, &hints, &locked_targetinfo);
-
-    pthread_mutex_unlock(&lock);
-
+    int getaddrinfo_status = getaddrinfo(
+        origin->hostname, get_origin_port(origin), 
+        &hints, &target_info->targetaddr
+    );
     if (getaddrinfo_status) {
         printf("getaddrinfo error: %s\n", gai_strerror(getaddrinfo_status));
         exit(1);
     }
 
+    pthread_mutex_lock(&lock);
+    decr_TargetInfo_rc(locked_target_info);
+    locked_target_info = target_info;
+    pthread_mutex_unlock(&lock);
+
     return false;
 }
 
-void handle_forwarding(int remote, struct PStr *request, char *target_hostname, bool use_ssl, struct addrinfo *targetinfo) {
-    int target = socket(targetinfo->ai_family, 
-        targetinfo->ai_socktype, targetinfo->ai_protocol);
+void handle_forwarding(int remote, struct PStr *request, struct TargetInfo *target_info) {
+    struct addrinfo *targetaddr = target_info->targetaddr;
+    struct Origin *target_origin = target_info->target_origin;
+    
+    int target = socket(targetaddr->ai_family, 
+    targetaddr->ai_socktype, targetaddr->ai_protocol);
     if (target == -1) {
         printf("target = socket() error\n");
         exit(1);
     }
 
-    if (connect(target, targetinfo->ai_addr, targetinfo->ai_addrlen)) {
+    if (connect(target, targetaddr->ai_addr, targetaddr->ai_addrlen)) {
         printf("connect to target error\n");
         exit(1);
     }
 
-    SSL *ssl;
+    SSL *ssl = NULL;
     recv_PStr recver;
 
-    if (use_ssl) {
-        ssl = upgrade_to_SSL(target_hostname, target);
+    if (uses_SSL(target_origin->protocol)) {
+        ssl = upgrade_to_SSL(target_origin->hostname, target);
 
         if (ssl == NULL) return;
 
@@ -350,19 +384,10 @@ void handle_forwarding(int remote, struct PStr *request, char *target_hostname, 
 
     if (redirect == NULL) {
         struct PStr *new_headers = str_response_headers(headers);
-
         struct PStr *response = build_PStr(
             "%p"HEADERSEND"%p", new_headers, response_body
         );
-
-        free_PStr(res1);
-        free_PStr(res2);
-        free_PStr(response_headers);
-        free_ResponseHeaders(headers);
-        free_PStr(response_body);
         free_PStr(new_headers);
-
-        close(target);
 
         if (send_PStr(remote, response)) {
             printf("Failed to send response to client\n");
@@ -371,17 +396,26 @@ void handle_forwarding(int remote, struct PStr *request, char *target_hostname, 
     } else {
         serve_forward_redirect(remote, redirect);
     }
+
+    free_PStr(res1);
+    free_PStr(res2);
+    free_PStr(response_headers);
+    free_ResponseHeaders(headers);
+    free_PStr(response_body);
+    if (ssl != NULL) close_SSL(ssl);
+    close(target);
 }
 
-void read_forwarding_request(int remote, struct RequestHeaders *headers, struct PStr *request_body, char *target_hostname, char *target_port, bool use_ssl, struct addrinfo *targetinfo) {
+void read_forwarding_request(int remote, struct RequestHeaders *headers, struct PStr *request_body, struct TargetInfo *target_info) {
     remove_header((struct Headers*)headers, "referer");
 
     set_header((struct Headers*)headers, "user-agent", "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
 
     set_header((struct Headers*)headers, "accept-encoding", "identity");
 
+    struct Origin *target_origin = target_info->target_origin;
     struct PStr *target_host = build_PStr(
-        "%s:%s", target_hostname, target_port
+        "%s:%s", target_origin->hostname, get_origin_port(target_origin)
     );
     set_header_PStr((struct Headers*)headers, "host", target_host);
 
@@ -392,7 +426,9 @@ void read_forwarding_request(int remote, struct RequestHeaders *headers, struct 
     );
     free_PStr(new_headers);
 
-    handle_forwarding(remote, forwardee, target_hostname, use_ssl, targetinfo);
+    handle_forwarding(
+        remote, forwardee, target_info
+    );
 
     free_PStr(forwardee);
 }
@@ -402,10 +438,8 @@ void handle_request(void *remote_storage) {
     free(remote_storage);
 
     pthread_mutex_lock(&lock);
-    char *target_hostname = locked_target_hostname;
-    char *target_port = locked_target_port;
-    bool use_ssl = locked_use_ssl;
-    struct addrinfo *targetinfo = locked_targetinfo;
+    struct TargetInfo *target_info = locked_target_info;
+    incr_TargetInfo_rc(target_info);
     pthread_mutex_unlock(&lock);
 
     set_basic_recv_sock(remote);
@@ -414,53 +448,45 @@ void handle_request(void *remote_storage) {
     struct PStr *req1 = new_PStr();
     struct PStr *request_headers = recv_headers(req1, recver);
     if (request_headers == NULL) {
-        close(remote);
-        free_PStr(req1);
-        return;
+        goto cleanup_req1;
     }
 
     struct RequestHeaders *headers = (struct RequestHeaders*)parse_headers(REQUEST, request_headers);
     if (headers == NULL) {
-        close(remote);
-        free_PStr(req1);
-        free_PStr(request_headers);
-        return;
+        goto cleanup_str_headers;
     }
 
     if (headers->http_version > HTTP11) {
-        close(remote);
-        free_PStr(req1);
-        free_PStr(request_headers);
-        free_RequestHeaders(headers);
         printf("Only http version 1.1 is supported for requests\n");
-        return;
+        goto cleanup_headers;
     }
 
     struct PStr *req2 = clone_PStr(req1);
     struct PStr *request_body;
     if (recv_body(req2, request_headers, (struct Headers*)headers, recver, &request_body)) {
-        close(remote);
-        free_PStr(req1);
-        free_PStr(req2);
-        free_PStr(request_headers);
-        free_RequestHeaders(headers);
-        return;
+        goto cleanup_req2;
     }
 
     if (PStr_starts_with(headers->url, SPECIALURL, strlen(SPECIALURL))) {
         serve_request(remote, headers, request_body);
-    } else if (targetinfo == NULL) {
+    } else if (target_info == NULL) {
         serve_redirect(remote, headers, 307, SPECIALURL VIEWURL);
     } else {
-        read_forwarding_request(remote, headers, request_body, target_hostname, target_port, use_ssl, targetinfo);
+        read_forwarding_request(remote, headers, request_body, target_info);
     }
 
-    free_PStr(request_headers);
-    free_RequestHeaders(headers);
-    free_PStr(req1);
-    free_PStr(req2);
+// cleanup_body:
     free_PStr(request_body);
+cleanup_req2:
+    free_PStr(req2);
+cleanup_headers:
+    free_RequestHeaders(headers);
+cleanup_str_headers:
+    free_PStr(request_headers);
+cleanup_req1:
+    free_PStr(req1);
     close(remote);
+    decr_TargetInfo_rc(target_info);
 }
 
 void server_loop(int server) {
@@ -523,9 +549,10 @@ int main() {
 
     server_loop(server);
 
+    shutdown_SSL();
+    
     pthread_mutex_lock(&lock);
-    freeaddrinfo(locked_targetinfo);
-    freeaddrinfo(serverinfo);
+    decr_TargetInfo_rc(locked_target_info);
     pthread_mutex_unlock(&lock);
 
     return 0;

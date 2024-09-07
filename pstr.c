@@ -347,18 +347,23 @@ struct PStr *PStr_remove_once(struct PStr *str, char *removee, int removee_len, 
     return clone_PStr(str);
 }
 
-struct PStr *PStr_to_lower(struct PStr *str) {
-    struct PStr *result = malloc(sizeof(struct PStr));
-    result->capacity = str->length;
-    result->length = str->length;
-    result->text = malloc(str->length);
+void PStr_lower_to_dest(struct PStr *str, struct PStr *dest) {
+    char *text = malloc(str->length);
     for (int i = 0; i < str->length; i++) {
         char chr = str->text[i];
         if (chr >= 65 && chr <= 90) {
-            chr = chr | 32;
+            chr |= 32;
         }
-        result->text[i] = chr;
+        text[i] = chr;
     }
+    dest->capacity = str->length;
+    dest->length = str->length;
+    dest->text = text;
+}
+
+struct PStr *PStr_to_lower(struct PStr *str) {
+    struct PStr *result = malloc(sizeof(struct PStr));
+    PStr_lower_to_dest(str, result);
     return result;
 }
 
