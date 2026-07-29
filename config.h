@@ -12,8 +12,11 @@ near-native experience:
 * desmos.com
 * commons.wikimedia.org
 * nytimes.org
+* developer.mozilla.org
+* stackoverflow.com
 Incomplete functionality:
 * codepen.io
+* turbowarp.org
 * web.archive.org
 Does not work:
 * youtube.com
@@ -35,6 +38,7 @@ Does not work:
 #define NEWTABURL "/new_tab"
 #define CHANGEORIGINURL "/change_origin"
 #define FAVICONURL "/favicon.ico"
+#define INJECTSCRIPTURL "/inject.js"
 
 #define SERVEPORT "8080"
 #define BACKLOG 10

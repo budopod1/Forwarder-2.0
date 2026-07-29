@@ -1,10 +1,11 @@
-#include "pstr.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "pstr.h"
+#include "cache.h"
 
 struct PStr *new_PStr() {
     return calloc(1, sizeof(struct PStr));
@@ -71,32 +72,48 @@ void null_terminate_PStr(struct PStr *str) {
     str->text[str->length] = '\0';
 }
 
+void make_PStr_independent(struct PStr *str) {
+    if (str->capacity < 0) {
+        char *new_txt = malloc(str->length);
+        memcpy(new_txt, str->text, str->length);
+        str->text = new_txt;
+        str->capacity = str->length;
+    }
+}
+
 struct PStr *read_file(char *path) {
-    // https://stackoverflow.com/a/14002993
+    bool found_in_cache;
+    struct PStr *primary = get_from_cache(path, &found_in_cache);
 
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        printf("Failed to find requested file %s\n", path);
-        return NULL;
+    if (!found_in_cache) {
+        // https://stackoverflow.com/a/14002993
+
+        FILE *file = fopen(path, "rb");
+        if (file == NULL) {
+            printf("Failed to find requested file %s\n", path);
+            return NULL;
+        }
+
+        fseek(file, 0, SEEK_END);
+        int size = ftell(file);
+        fseek(file, 0, SEEK_SET);
+
+        char *text = malloc(size);
+        if (fread(text, size, 1, file) < 1) {
+            printf("Failed to load requested file %s\n", path);
+            return NULL;
+        }
+        fclose(file);
+
+        primary = malloc(sizeof(*primary));
+        primary->capacity = size;
+        primary->length = size;
+        primary->text = text;
+
+        add_to_cache(path, primary);
     }
 
-    fseek(file, 0, SEEK_END);
-    int size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    char *text = malloc(size);
-    if (fread(text, size, 1, file) < 1) {
-        printf("Failed to load requested file %s\n", path);
-        return NULL;
-    }
-    fclose(file);
-
-    struct PStr *result = malloc(sizeof(*result));
-    result->capacity = size;
-    result->length = size;
-    result->text = text;
-
-    return result;
+    return clone_PStr(primary);
 }
 
 struct PStr *slice_PStr(struct PStr *source, int start, int len) {
@@ -169,8 +186,8 @@ struct PStrList *split_trim_PStr(struct PStr *txt, char *splitter, int splitter_
     return list;
 }
 
-int CStr_equals_PStr(char *cstr, struct PStr *pstr) {
-    if ((int)strlen(cstr) != pstr->length) return 0;
+bool CStr_equals_PStr(char *cstr, struct PStr *pstr) {
+    if ((int)strlen(cstr) != pstr->length) return false;
     return memcmp(cstr, pstr->text, pstr->length) == 0;
 }
 
@@ -262,6 +279,17 @@ void extend_PStr(struct PStr *str, const char *other, int other_len) {
     require_PStr_capacity(str, new_len);
     memcpy(str->text + str->length, other, other_len);
     str->length = new_len;
+}
+
+void PStr_insert(struct PStr *str, int idx, char *insertee, int insertee_len) {
+    if (str->capacity < 0) {
+        printf("Cannot insert into dependent PStr\n");
+        exit(1);
+    }
+    require_PStr_capacity(str, str->length + insertee_len);
+    memmove(str->text + idx + insertee_len, str->text + idx, str->length - idx);
+    memcpy(str->text + idx, insertee, insertee_len);
+    str->length += insertee_len;
 }
 
 struct PStr *join_PStrList(struct PStrList *list, char *sep, int sep_len) {
@@ -367,9 +395,17 @@ struct PStr *PStr_to_lower(struct PStr *str) {
     return result;
 }
 
-int PStr_starts_with(struct PStr *str, char *sub, int sublen) {
+bool PStr_starts_with(struct PStr *str, char *sub, int sublen) {
     if (str->length < sublen) return 0;
     return memcmp(str->text, sub, sublen) == 0;
+}
+
+int PStr_index_of(struct PStr *str, char *substr, int substrlen) {
+    for (int i = 0; i <= str->length - substrlen; i++) {
+        if (memcmp(str->text + i, substr, substrlen) == 0)
+            return i;
+    }
+    return -1;
 }
 
 struct PStr *_build_PStr(const char *fmt, va_list args) {

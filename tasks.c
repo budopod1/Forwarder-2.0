@@ -4,6 +4,7 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include "config.h"
+#include "tasks.h"
 
 struct ThreadData {
     atomic_bool is_running;

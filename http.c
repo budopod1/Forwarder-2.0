@@ -368,31 +368,34 @@ struct PStr *recv_headers(struct PStr *req, recv_PStr recver) {
     }
 }
 
-int recv_body_fail() {
+bool recv_body_fail() {
     printf("Connection unexpectedly closed while receiving body\n");
-    return 1;
+    return true;
 }
 
-int recv_body_chunked(struct PStr *req, struct PStr *headersTxt, recv_PStr recver, struct PStr **request_body) {
+int recv_body_chunked(struct PStr *req, struct PStr *headersTxt, recv_PStr recver, struct PStr **body) {
     int chunkSize = -1;
     int ogLength = headersTxt->length + HEADERSENDSIZE;
     int i = ogLength;
+
+    struct PStr *body_buffer = new_PStr();
     
     while (1) {
         int numStart = i;
-        int hasExtension = 0;
+        bool hasExtension = false;
         while (1) {
             for (; i <= req->length - HTTPNEWLINESIZE; i++) {
                 hasExtension = req->text[i] == ';';
                 if (hasExtension || (memcmp(req->text + i, HTTPNEWLINE, HTTPNEWLINESIZE) == 0)) {
                     if (parse_int(req->text + numStart, i - numStart, 16, &chunkSize)) {
                         printf("Invalid chunk size\n");
-                        return 1;
+                        free_PStr(body_buffer);
+                        return true;
                     }
                     goto foundChunkSize;
                 }
             }
-            if (recver(req)) return recv_body_fail();
+            if (recver(req)) goto recv_fail;
         }
         
     foundChunkSize:
@@ -403,7 +406,7 @@ int recv_body_chunked(struct PStr *req, struct PStr *headersTxt, recv_PStr recve
                         goto finishedExtension;
                     }
                 }
-                if (recver(req)) return recv_body_fail();
+                if (recver(req)) goto recv_fail;
             }
         }
 
@@ -413,34 +416,39 @@ int recv_body_chunked(struct PStr *req, struct PStr *headersTxt, recv_PStr recve
             while (1) {
                 for (; i <= req->length - HEADERSENDSIZE; i++) {
                     if (memcmp(req->text + i, HEADERSEND, HEADERSENDSIZE) == 0) {
-                        i += HEADERSENDSIZE;
-                        *request_body = slice_PStr(req, ogLength, i - ogLength);
-                        return 0;
+                        *body = body_buffer;
+                        return false;
                     }
                 }
-                if (recver(req)) return recv_body_fail();
+                if (recver(req)) goto recv_fail;
             }
         } else {
-            i += HTTPNEWLINESIZE + chunkSize + HTTPNEWLINESIZE;
+            int chunkStart = i + HTTPNEWLINESIZE;
+            i = chunkStart + chunkSize + HTTPNEWLINESIZE;
             while (req->length < i) {
-                if (recver(req)) return recv_body_fail();
+                if (recver(req)) goto recv_fail;
             }
+            extend_PStr(body_buffer, req->text + chunkStart, chunkSize);
             continue;
         }
     }
+
+recv_fail:
+    free_PStr(body_buffer);
+    return recv_body_fail();
 }
 
-int recv_body_identity(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
+int recv_body_identity(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **body) {
     struct PStr *contentLengthTxt = get_header(headers, "content-length");
     if (contentLengthTxt == NULL) {
-        *request_body = new_PStr();
-        return 0;
+        *body = new_PStr();
+        return false;
     }
 
     int contentLength;
     if (PStr_parse_int(contentLengthTxt, 10, &contentLength)) {
         printf("Invalid Content-Length\n");
-        return 1;
+        return true;
     }
     
     int ogLength = headersTxt->length + strlen(HEADERSEND);
@@ -448,24 +456,24 @@ int recv_body_identity(struct PStr *req, struct PStr *headersTxt, struct Headers
         if (recver(req)) return recv_body_fail();
     }
     
-    *request_body = slice_PStr(req, ogLength, contentLength);
-    return 0;
+    *body = slice_PStr(req, ogLength, contentLength);
+    return false;
 }
 
-int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body) {
+bool recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **body) {
     enum TransferEncoding encoding = identity_TRANSFERENCODING;
     struct PStr *transferEncodingTxt = get_header(headers, "transfer-encoding");
     if (transferEncodingTxt != NULL) {
         encoding = parse_transfer_encoding(transferEncodingTxt);
         if (encoding & UNKNOWNTRANSFERENCODING) {
             printf("Unknown Transfer-Encoding\n");
-            return 1;
+            return true;
         }
     }
     
     if (encoding & chunked_TRANSFERENCODING) {
-        return recv_body_chunked(req, headersTxt, recver, request_body);
+        return recv_body_chunked(req, headersTxt, recver, body);
     } else {
-        return recv_body_identity(req, headersTxt, headers, recver, request_body);
+        return recv_body_identity(req, headersTxt, headers, recver, body);
     }
 }

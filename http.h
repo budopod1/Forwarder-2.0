@@ -118,6 +118,6 @@ void add_headers(struct Headers *headers, int count, char *keys[], char *values[
 
 struct PStr *recv_headers(struct PStr *req, recv_PStr recver);
 
-int recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **request_body);
+bool recv_body(struct PStr *req, struct PStr *headersTxt, struct Headers *headers, recv_PStr recver, struct PStr **body);
 
 #endif

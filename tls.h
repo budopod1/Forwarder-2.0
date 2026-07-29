@@ -1,4 +1,5 @@
 #include <openssl/ssl.h>
+#include "pstr.h"
 
 #ifndef TLS_H
 #define TLS_H

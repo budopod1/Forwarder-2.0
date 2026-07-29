@@ -7,6 +7,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 #include <threads.h>
+#include "tls.h"
 #include "pstr.h"
 #include "config.h"
 

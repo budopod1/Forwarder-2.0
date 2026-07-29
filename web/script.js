@@ -1,5 +1,6 @@
 const URL_SHOW_AMOUNT = 25;
-const NEW_TAB_URL = "/forwarder/new_tab"
+const NEW_TAB_URL = "/forwarder/new_tab";
+const URL_REGEX = /^(\w+:\/\/)?([A-Za-z0-9_\-]+\.)+\w{2,}(\/[A-Za-z0-9\-._~:?#[\]@!$&'()*+,;%=]*)*$/;
 
 let THIS_ORIGIN = location.origin;
 
@@ -61,13 +62,21 @@ async function switchTab(tab) {
     urlBarInput.value = tab.displayedURL;
 }
 
-function updateTabName(tab) {
+function displayTabName(tab) {
     tab.tabTxt.innerText = tab.name;
 }
 
-function getTabOrigin(tab) {
-    if (tab.url == NEW_TAB_URL) return null;
-    return tab.origin;
+function updateCurrentTabTitle(txt) {
+    let tab = currentTab;
+    txt = txt == null ? tab.url : txt;
+    if (txt.length > URL_SHOW_AMOUNT)
+        txt = txt.slice(0, URL_SHOW_AMOUNT).trimEnd() + "...";
+    tab.name = txt;
+    displayTabName(tab, txt);
+}
+
+function getCurrentOrigin() {
+    return currentTab.origin;
 }
 
 function urlPath(url) {
@@ -76,10 +85,13 @@ function urlPath(url) {
 
 function displayTabURL(tab, url) {
     tab.url = urlPath(url);
-    let origin = getTabOrigin(tab);
-    tab.displayedURL = origin == null ? "" : origin + tab.url;
+    tab.displayedURL = tab.origin == null ? "" : tab.origin + tab.url;
     if (tab.showing)
         urlBarInput.value = tab.displayedURL;
+}
+
+function displayCurrentTabPath(path) {
+    displayTabURL(currentTab, new URL(currentTab.url.origin + path));
 }
 
 async function setTabURL(tab, url) {
@@ -112,88 +124,10 @@ async function specialURLRedirect(tab) {
     return false;
 }
 
-function processElement(tab, elem, attr, onNewOrigin) {
-    let href = elem.getAttribute(attr);
-    if (href != null && href != "") {
-        if (href.startsWith("//")) href = "https:" + href;
-        if (URL.canParse(href)) {
-            let url = new URL(href);
-            if (tab.origin == url.origin) {
-                elem.setAttribute(attr, urlPath(url));
-            } else {
-                onNewOrigin(url);
-            }
-        }
-    }
-}
-
-function processForm(tab, form) {
-    processElement(tab, form, "action", (url) => {
-        form.setAttribute("action", urlPath(url));
-        form.addEventListener("submit", (e) => {
-            e.preventDefault();
-            (async () => {
-                await setOrigin(url.origin);
-                form.submit();
-            })();
-        });
-    });
-}
-
-function processLink(tab, a) {
-    let target = a.getAttribute("target");
-    if (target != "_blank") {
-        a.removeAttribute("target");
-    }
-    
-    processElement(tab, a, "href", (url) => {
-        a.setAttribute("href", "#");
-        a.addEventListener("click", () => 
-            navigateToURL(tab, url)
-        );
-    });
-    
-    if (a.id == "forwarder-2-redirect") {
-        a.click();
-    }
-}
-
-async function iframeHandler(tab, iframe) {
-    if (iframe.contentDocument == null) return;
-    let idocument = iframe.contentWindow.document;
-    let ilocation = iframe.contentWindow.location;
-
-    let bases = idocument.getElementsByTagName("base");
-    for (let base of bases) {
-        base.remove();
-    }
-
-    let as = idocument.getElementsByTagName("a");
-    for (let a of as) {
-        processLink(tab, a);
-    }
-
-    let forms = idocument.getElementsByTagName("form");
-    for (let form of forms) {
-        processForm(tab, form);
-    }
-
-    await displayTabURL(tab, ilocation);
-    if (await specialURLRedirect(tab)) {
-        return;
-    }
-
-    let title = idocument.querySelector("title");
-    tab.name = title == null ? tab.displayedURL : title.innerText;
-    if (tab.name.length > URL_SHOW_AMOUNT) {
-        tab.name = tab.name.slice(0, URL_SHOW_AMOUNT).trimEnd() + "...";
-    }
-    updateTabName(tab);
-}
-
 async function addNewTab() {
     let section = document.createElement("section");
     let iframe = document.createElement("iframe");
+    iframe.sandbox = "allow-downloads allow-forms allow-modals allow-orientation-lock allow-pointer-lock allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts allow-storage-access-by-user-activation";
     let url = NEW_TAB_URL;
 
     let tabBtn = document.createElement("button");
@@ -210,24 +144,22 @@ async function addNewTab() {
     tabsElem.insertBefore(tabBtn, newTabBtn);
 
     let tab = {
-        url, displayedURL: "", origin: null, section, iframe, tabBtn, name: "New Tab",
-        showing: false, tabTxt
+        url, displayedURL: "", origin: null, section, iframe, tabBtn,
+        name: "New Tab", showing: false, tabTxt, hist: []
     };
-    closeBtn.onclick = (e) => {
+    closeBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         closeTab(tab);
-    };
+    });
     tabs.push(tab);
-    updateTabName(tab);
-    tabBtn.onclick = () => switchTab(tab);
+    displayTabName(tab);
+    tabBtn.addEventListener("click", () => switchTab(tab));
     await switchTab(tab);
-    
+
     iframe.addEventListener("load", () => {
-        iframe.addEventListener("load", () => {
-            iframeHandler(tab, iframe);
-        });
         iframe.src = THIS_ORIGIN + url;
     }, {once: true});
+
     section.appendChild(iframe);
     mainElem.appendChild(section);
 }
@@ -239,20 +171,27 @@ async function navigateToURL(tab, url) {
     }
 }
 
-async function navigateGivenInput(tab, urlTxt) {
-    let slashIndex = urlTxt.indexOf("://");
-    if (slashIndex == -1) {
-        urlTxt = "https://" + urlTxt;
+async function redirectCurrentTab(txt) {
+    if (txt.startsWith("/")) {
+        txt = currentOrigin + txt;
     }
-    let url = new URL(urlTxt);
-    let dotIndex = urlTxt.indexOf(".");
-    if (dotIndex == -1) {
-        url.hostname += ".com";
+    await navigateToURL(currentTab, new URL(txt));
+}
+
+async function navigateGivenInput(tab, input) {
+    let url;
+    if (input.match(URL_REGEX)) {
+        if (input.indexOf("://") == -1) {
+            input = "https://" + input;
+        }
+        url = new URL(input);
+    } else {
+        url = new URL(`https://duckduckgo.com/?q=${encodeURIComponent(input)}`);
     }
     await navigateToURL(tab, url);
 }
 
-onload = () => {
+addEventListener("load", () => {
     mainElem = document.querySelector("main");
     tabsElem = document.getElementById("tabs");
     urlBarInput = document.getElementById("url-bar");
@@ -262,40 +201,40 @@ onload = () => {
     faviconLocationInput = document.getElementById("favicon-location");
     
     addNewTab();
-    newTabBtn.onclick = addNewTab;
+    newTabBtn.addEventListener("click", addNewTab);
 
-    document.getElementById("back-btn").onclick = () => {
+    document.getElementById("back-btn").addEventListener("click", () => {
         currentTab.iframe.contentWindow.history.back();
-    };
+    });
 
-    document.getElementById("forward-btn").onclick = () => {
+    document.getElementById("forward-btn").addEventListener("click", () => {
         currentTab.iframe.contentWindow.history.forward();
-    };
+    });
 
-    document.getElementById("reload-btn").onclick = () => {
+    document.getElementById("reload-btn").addEventListener("click", () => {
         currentTab.iframe.contentWindow.location.reload();
-    };
+    });
 
-    document.getElementById("url-bar-holder").onsubmit = (e) => {
+    document.getElementById("url-bar-holder").addEventListener("submit", (e) => {
         e.preventDefault();
         navigateGivenInput(currentTab, urlBarInput.value);
-    };
+    });
 
-    document.getElementById("settings-btn").onclick = () => {
+    document.getElementById("settings-btn").addEventListener("click", () => {
         settingsModal.style.display = "flex";
-    };
+    });
 
-    document.getElementById("settings-modal-close").onclick = () => {
+    document.getElementById("settings-modal-close").addEventListener("click", () => {
         settingsModal.style.display = "none";
-    };
+    });
 
-    pageTitleInput.onchange = () => {
+    pageTitleInput.addEventListener("change", () => {
         let pageTitle = pageTitleInput.value;
         localStorage.setItem("title", pageTitle);
         setTitle(pageTitle);
-    };
+    });
 
-    faviconLocationInput.onchange = () => {
+    faviconLocationInput.addEventListener("change", () => {
         let faviconHREF = faviconLocationInput.value;
         if (faviconHREF != "") {
             if (faviconHREF.match(/^\w+$/))
@@ -309,7 +248,7 @@ onload = () => {
                 faviconHREF = "https://" + faviconHREF;
         }
         setFavicon(faviconHREF);
-    };
+    });
 
     {
         let pageTitle = localStorage.getItem("title");
@@ -317,4 +256,11 @@ onload = () => {
 
         setFavicon(localStorage.getItem("favicon"));
     }
-};
+});
+
+addEventListener("message", (e) => (async () => {
+    if (!e.data.forwarder2) return;
+    let result = window[e.data.func](...e.data.args);
+    if (e.data.async_) result = await result;
+    e.source.postMessage({forwarder2: true, completion: e.data.completion, result});
+})());
